@@ -1,0 +1,10 @@
+PySide6
+uiautomation
+keyboard
+mss
+pillow
+openai
+faster-whisper
+sounddevice
+numpy
+pyttsx3
