@@ -33,7 +33,7 @@ def _ease(t):
 class Overlay(QWidget):
     """Full-screen click-through layer. Modes: idle, listening, thinking, message, pointing, done."""
 
-    def __init__(self, level_fn=lambda: 0.0):
+    def __init__(self, level_fn=lambda: 0.0, session_fn=lambda: False):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
                             | Qt.Tool | Qt.WindowTransparentForInput)
@@ -41,6 +41,7 @@ class Overlay(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating)
         self.setGeometry(QApplication.primaryScreen().geometry())
         self.level_fn = level_fn
+        self.session_fn = session_fn   # True while Turo is in a conversation (no wake word needed)
         self.mode = "idle"
         self.mode_t = time.time()
         self.target = None      # QRectF in widget coords
@@ -193,6 +194,13 @@ class Overlay(QWidget):
     def _draw_buddy(self, p, now):
         bob = math.sin(now * 3) * 1.5 if not self.flight else 0
         b = self.buddy + QPointF(0, bob)
+        if self.session_fn():   # "I'm with you": a soft breathing halo while the session is open
+            breath = (math.sin(now * 2.5) + 1) / 2
+            halo = QColor(BLUE)
+            halo.setAlpha(int(40 + 50 * breath))
+            p.setPen(Qt.NoPen)
+            p.setBrush(halo)
+            p.drawEllipse(b + QPointF(9, 10), 20 + 5 * breath, 20 + 5 * breath)
         scale = 1.0 + (0.15 * (math.sin(now * 8) + 1) / 2 if self.mode == "listening" else 0)
         path = QPainterPath(QPointF(b.x(), b.y()))   # tip points up-left, like a cursor
         path.lineTo(b.x() + 7 * scale, b.y() + 22 * scale)

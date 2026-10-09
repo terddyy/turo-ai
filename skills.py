@@ -31,7 +31,8 @@ def for_app(title, exe):
 
     by_title = [s for s in SKILLS if any(hit(w, title) for w in s[1])]
     by_exe = [s for s in SKILLS if s not in by_title and any(hit(w, exe) for w in s[1])]
-    picked = (by_title + by_exe)[:MAX_SKILLS]
+    specific = lambda s: len(s[1])   # a skill matching fewer words is more specific (Claude before AI-chat)
+    picked = (sorted(by_title, key=specific) + sorted(by_exe, key=specific))[:MAX_SKILLS]
     if picked:
         print(f"[skills] {[s[0] for s in picked]}")
     return "\n\n".join(s[2] for s in picked)

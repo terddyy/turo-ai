@@ -39,7 +39,8 @@ class Bridge(QObject):
 
 app = QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(False)
-overlay = Overlay(level_fn=lambda: voice.level if voice else 0.0)
+overlay = Overlay(level_fn=lambda: voice.level if voice else 0.0,
+                  session_fn=lambda: bool(voice and voice.in_session()))
 bridge = Bridge()
 state = {"hwnd": None, "question": "", "history": [], "gen": 0, "stop": False,
          "talking": False, "last": None}
@@ -101,8 +102,9 @@ def present(step, prefix=""):
 
 
 def finish(gen):
-    say_and_show(None, "All done! 🎉")
+    say_and_show(None, "All done! 🎉 Anything else?")
     bridge.mode.emit("done")
+    open_follow_up()
     time.sleep(3)
     if state["gen"] == gen:
         bridge.clear.emit()
@@ -184,13 +186,15 @@ def handle_speech(text, follow_up=False):
         start_agent()
     else:
         state["hwnd"] = auto.GetForegroundWindow()
+        if voice and WAKE_WORD:
+            voice.expect()   # a request starts (or continues) the session
         if follow_up and state["question"]:   # keep the thread of the conversation
             text = f"{text} (follow-up; earlier the user asked: {state['question'].split(' (follow-up')[0]})"
         new_question(text)
 
 
 def open_follow_up():
-    """Conversation mode: once Turo stops talking, the next phrase needs no "Hey Turo"."""
+    """Keep the session open: once Turo stops talking, the user just talks (no "Hey Turo") for a while."""
     if not (voice and WAKE_WORD):
         return
 
@@ -206,6 +210,7 @@ def open_follow_up():
 
 def on_wake():
     state["gen"] += 1
+    voice.expect()   # the session starts now
     bridge.show.emit(None, "Yes? I'm listening…")
     bridge.mode.emit("listening")
 
@@ -328,6 +333,8 @@ def start_agent():
 def stop_all():
     state["stop"] = True
     state["gen"] += 1
+    if voice:
+        voice.expect(0)   # end the session: back to waiting for "Hey Turo"
     bridge.clear.emit()
 
 

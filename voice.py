@@ -17,7 +17,7 @@ MIN_RMS = 0.004   # quieter than this is silence; Parakeet invents "Thank you." 
 WAKE = re.compile(r"(?<![a-z])(?:(?:hey|hi|hay|okay|ok)\W+(?:t[aeiou]{1,2}r+[aeiou]{0,2}w?|tudo|duro|truro|tour o)"
                   r"|turo|toro|turrow)\b\W*", re.IGNORECASE)
 FILLERS = re.compile(r"(?<![a-z])(?:uh+|um+|uhm+|erm|er|ah+|hmm+|you know)(?![a-z])[,.]?\s*", re.IGNORECASE)
-FOLLOW_UP_S = 8   # after Turo speaks, listen this long for a follow-up without "Hey Turo"
+FOLLOW_UP_S = 45   # a session stays open this long after Turo last spoke; Esc / "stop" ends it
 
 # Parakeet TDT 0.6B v3 (English), int8 on CPU: ~0.4 s per phrase. Load once: takes seconds.
 model = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", PARAKEET_DIR, quantization="int8")
@@ -83,9 +83,13 @@ _expect_until = 0.0
 
 
 def expect(seconds=FOLLOW_UP_S):
-    """Treat the next phrase within `seconds` as a request, no wake word needed (conversation mode)."""
+    """Session: for `seconds`, every phrase is a request, no wake word needed. 0 ends the session."""
     global _expect_until
-    _expect_until = time.time() + seconds
+    _expect_until = time.time() + seconds if seconds else 0.0
+
+
+def in_session():
+    return time.time() < _expect_until
 
 
 def _utterances():
@@ -118,8 +122,7 @@ def _listen_loop(on_wake, on_request):
         if not text:
             continue
         rest = strip_wake(text)
-        if rest is None and time.time() < _expect_until:   # follow-up inside the conversation window
-            _expect_until = 0.0
+        if rest is None and time.time() < _expect_until:   # inside a session: no wake word needed
             if clean(text):
                 on_request(clean(text), True)
             continue
