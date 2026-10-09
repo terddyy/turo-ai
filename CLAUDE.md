@@ -33,7 +33,8 @@ That guide is the source of truth for scope and order; this file adds verified A
 - **Threading:** hotkey callbacks and worker threads only `emit` Qt signals; all drawing on the Qt thread.
   Any UIA call off the main thread goes inside `with auto.UIAutomationInitializerInThread():`.
 - Save the target `hwnd` the instant the hotkey fires, before Turo's dialog steals focus.
-- Hotkeys never use Alt (opens Excel ribbon key tips). Registered with `suppress=True` (except Esc).
+- Hotkeys avoid Alt (opens Excel ribbon key tips), except voice: hold **Win+Alt** (user request), which
+  injects unassigned vk 0xE8 on press so Start/key tips do not open. F-keys use `suppress=True` (not Esc).
 - Agent mode guards stay: `MAX_AGENT_STEPS`, RISKY-name stop, Esc stop.
 
 ## Hotkeys
@@ -42,7 +43,7 @@ That guide is the source of truth for scope and order; this file adds verified A
 | --- | --- |
 | F9 | Ask by typing |
 | F10 | Next step (re-read screen) |
-| Hold F8 | Ask by voice |
+| Hold Win+Alt | Ask by voice |
 | F7 / Esc | Agent mode / stop |
 | F6 | One-time cloud ask (after warning) |
 

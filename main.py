@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog
 
 import brain
 import screen
-from config import AGENT_KEY, ASK_KEY, CLOUD_KEY, MAX_AGENT_STEPS, NEXT_KEY, TALK_KEY
+from config import AGENT_KEY, ASK_KEY, CLOUD_KEY, MAX_AGENT_STEPS, NEXT_KEY
 from overlay import Overlay
 
 try:
@@ -139,17 +139,43 @@ def ask_question():
         new_question(dlg.textValue().strip())
 
 
-# --- hold F8: ask by voice ---------------------------------------------------------
-def on_talk_down(_event):
+# --- hold Win+Alt: ask by voice ----------------------------------------------------
+held = set()
+
+
+def mask_modifiers():
+    # Tap an unassigned key (vk 0xE8) so releasing Win won't open Start
+    # and releasing Alt won't open Office's ribbon key tips.
+    user32.keybd_event(0xE8, 0, 0, 0)
+    user32.keybd_event(0xE8, 0, 2, 0)   # KEYEVENTF_KEYUP
+
+
+def on_any_key(event):
+    name = (event.name or "").lower()
+    kind = "win" if "windows" in name else "alt" if ("alt" in name or "menu" in name) else None
+    if not kind:
+        return
+    if event.event_type == keyboard.KEY_DOWN:
+        held.add(kind)
+    else:
+        held.discard(kind)
+    if held == {"win", "alt"}:
+        on_talk_down()
+    elif state["talking"]:
+        on_talk_up()
+
+
+def on_talk_down():
     if voice and not state["talking"]:   # key repeat fires this many times
         state["talking"] = True
+        mask_modifiers()
         state["hwnd"] = auto.GetForegroundWindow()
         state["gen"] += 1
-        bridge.show.emit(None, "🎙️ Nakikinig ako... (bitawan ang F8 kapag tapos na)")
+        bridge.show.emit(None, "🎙️ Nakikinig ako... (bitawan ang Win+Alt kapag tapos na)")
         voice.start()
 
 
-def on_talk_up(_event):
+def on_talk_up():
     if not voice or not state["talking"]:
         return
     state["talking"] = False
@@ -224,9 +250,8 @@ keyboard.add_hotkey(AGENT_KEY, start_agent, suppress=True)
 keyboard.add_hotkey(CLOUD_KEY, ask_cloud, suppress=True)
 keyboard.add_hotkey("esc", stop_all)
 if voice:
-    keyboard.on_press_key(TALK_KEY, on_talk_down, suppress=True)
-    keyboard.on_release_key(TALK_KEY, on_talk_up, suppress=True)
-print(f"Turo ready. {ASK_KEY.upper()} type, hold {TALK_KEY.upper()} talk, {NEXT_KEY.upper()} next, "
+    keyboard.hook(on_any_key)   # not suppressed: Win and Alt must keep working normally
+print(f"Turo ready. {ASK_KEY.upper()} type, hold Win+Alt talk, {NEXT_KEY.upper()} next, "
       f"{AGENT_KEY.upper()} do it for me, Esc stop, {CLOUD_KEY.upper()} cloud"
       f"{'' if brain.cloud else ' (not set)'}.")
 sys.exit(app.exec())

@@ -7,7 +7,7 @@ NO_THINK = False  # True sends reasoning_effort="none"; only for models whose `o
 # Hotkeys: never use Alt (opens Excel's ribbon key tips).
 ASK_KEY = "f9"
 NEXT_KEY = "f10"
-TALK_KEY = "f8"
+TALK_KEY = "windows+alt"   # hold; main.py masks the release so Start menu and Office key tips stay shut
 AGENT_KEY = "f7"
 CLOUD_KEY = "f6"
 
