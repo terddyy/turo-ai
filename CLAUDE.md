@@ -88,7 +88,12 @@ python main.py     # full app
 - High-DPI scaling is always on; default rounding policy is PassThrough, so `devicePixelRatioF()`
   is fractional. Overlay converts UIA physical px → logical px by dividing by it (primary monitor only).
 
-**faster-whisper**
+**Speech-to-text (07:00): Parakeet TDT 0.6B v3 int8 via `onnx-asr`, English only** — replaced faster-whisper.
+  Model files reused from `%APPDATA%\com.pais.handy\models\parakeet-tdt-0.6b-v3-int8` (`TURO_PARAKEET_DIR`
+  overrides). ~0.3 s/phrase on CPU. Invents "Thank you." from silence → keep the `MIN_RMS` gate.
+  Wake word "Hey Turo" is matched on Parakeet text (it heard "Hey Turrow"). UI text is English.
+
+**faster-whisper (no longer used)**
 - `transcribe(np.float32 16 kHz array, language="tl")` returns `(segments_generator, info)`;
   work happens only when the generator is iterated.
 - Useful knobs: `vad_filter=True` (trims push-to-talk silence), `beam_size=1` (faster on CPU),

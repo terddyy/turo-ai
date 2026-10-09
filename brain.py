@@ -28,7 +28,7 @@ Next screen: "12 | TabItem (selected) | Insert", "40 | MenuItem | Table". Reply:
 Example 2. Question: "Paano mag-sort ng A to Z?" in Excel, Home tab selected.
 Controls include "33 | TabItem | Data". Reply: {"id": 33, "say": "I-click ang Data tab, nandoon ang Sort.", "done": false}"""
 
-FALLBACK_SAY = "Hindi ko makita. Subukan ulit."
+FALLBACK_SAY = "I couldn't find that on screen. Try asking another way."
 
 
 def _parse(text):

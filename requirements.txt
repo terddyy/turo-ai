@@ -4,7 +4,7 @@ keyboard
 mss
 pillow
 openai
-faster-whisper
+onnx-asr[cpu]
 sounddevice
 numpy
 pyttsx3

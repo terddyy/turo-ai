@@ -12,6 +12,11 @@ AGENT_KEY = "f7"
 CLOUD_KEY = "f6"
 
 MAX_AGENT_STEPS = 6
+WAKE_WORD = True   # always listen for "Hey Turo" (audio stays on this laptop)
+
+# Speech-to-text model folder (Parakeet TDT 0.6B v3 int8, onnx-asr layout).
+PARAKEET_DIR = os.environ.get("TURO_PARAKEET_DIR",
+                              os.path.expandvars(r"%APPDATA%\com.pais.handy\models\parakeet-tdt-0.6b-v3-int8"))
 MAX_ITEMS = 120   # keeps the prompt inside Ollama's 4096-token context (overflow is silent)
 
 # Cloud fallback (F6 only, after a warning). Values come only from the environment.

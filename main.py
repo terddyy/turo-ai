@@ -1,5 +1,6 @@
 import ctypes
 import ctypes.wintypes
+import re
 import sys
 import threading
 import time
@@ -11,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog
 
 import brain
 import screen
-from config import AGENT_KEY, ASK_KEY, CLOUD_KEY, MAX_AGENT_STEPS, NEXT_KEY
+from config import AGENT_KEY, ASK_KEY, CLOUD_KEY, MAX_AGENT_STEPS, NEXT_KEY, WAKE_WORD
 from overlay import Overlay
 
 try:
@@ -30,20 +31,31 @@ except Exception as err:   # no mic or model: typing still works
 class Bridge(QObject):
     ask = Signal()                # hotkey thread -> Qt thread
     show = Signal(object, str)    # worker thread -> Qt thread
+    mode = Signal(str)            # listening / thinking / done / reset
     clear = Signal()
 
 
 app = QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(False)
-overlay = Overlay()
+overlay = Overlay(level_fn=lambda: voice.level if voice else 0.0)
 bridge = Bridge()
-state = {"hwnd": None, "question": "", "history": [], "gen": 0, "stop": False, "talking": False}
+state = {"hwnd": None, "question": "", "history": [], "gen": 0, "stop": False,
+         "talking": False, "last": None}
 busy = threading.Lock()   # one model call at a time
 user32 = ctypes.windll.user32
 RISKY = ("delete", "remove", "send", "pay", "buy", "format", "sign out", "shut down", "uninstall")
 
+# Spoken commands. Matched only when the whole phrase is the command, so questions never trigger them.
+COMMANDS = {
+    "next": ("next", "next step", "continue", "go on", "done", "what's next", "and then", "what now"),
+    "stop": ("stop", "cancel", "never mind", "nevermind", "quit", "that's enough", "close"),
+    "repeat": ("repeat", "say again", "say that again", "come again", "repeat that"),
+    "agent": ("do it", "do it for me", "you do it", "just do it", "go ahead", "do it yourself"),
+}
+
 
 def say_and_show(rect, text):
+    state["last"] = (rect, text)
     bridge.show.emit(rect, text)
     if speak:
         speak.speak(text)
@@ -65,8 +77,16 @@ def compute_step(use_cloud=False):
     return None, seen["say"], False, ""
 
 
+def finish(gen):
+    say_and_show(None, "All done! 🎉")
+    bridge.mode.emit("done")
+    time.sleep(3)
+    if state["gen"] == gen:
+        bridge.clear.emit()
+
+
 def watch_click(rect, done, gen):
-    """Clicky-style auto-advance: a click inside the box moves to the next step."""
+    """Auto-advance: a click inside the highlighted box moves to the next step."""
     left, top, right, bottom = rect
     was_down = False
     while state["gen"] == gen:
@@ -79,10 +99,7 @@ def watch_click(rect, done, gen):
                 if state["gen"] != gen:
                     return
                 if done:
-                    bridge.show.emit(None, "Tapos na! 🎉")
-                    time.sleep(2.5)
-                    if state["gen"] == gen:
-                        bridge.clear.emit()
+                    finish(gen)
                 else:
                     start_step()
                 return
@@ -95,8 +112,6 @@ def run_step(use_cloud):
         with auto.UIAutomationInitializerInThread():
             rect, say, done, _ = compute_step(use_cloud)
         say = ("[CLOUD] " if use_cloud else "") + say
-        if not rect and not use_cloud and brain.cloud:
-            say += f" Pindutin ang {CLOUD_KEY.upper()} para itanong sa cloud (lalabas sa laptop ang screen at tanong mo)."
         state["history"].append(say)
         say_and_show(rect, say)
         if rect:
@@ -112,13 +127,45 @@ def start_step(use_cloud=False):
     if not state["question"] or not busy.acquire(blocking=False):
         return
     state["gen"] += 1   # cancels the previous click watcher
-    bridge.show.emit(None, f'"{state["question"]}"\nTinitingnan ko ang screen mo...')
+    bridge.show.emit(None, f'"{state["question"]}"')
+    bridge.mode.emit("thinking")
     threading.Thread(target=run_step, args=(use_cloud,), daemon=True).start()
 
 
 def new_question(text):
     state["question"], state["history"] = text, []
+    bridge.mode.emit("reset")
     start_step()
+
+
+# --- spoken input: commands or a new question ---------------------------------------
+def command_of(text):
+    t = " ".join(re.sub(r"[^a-z' ]", " ", text.lower()).split())
+    t = re.sub(r"^(?:(?:please|okay|ok|hey|turo)\s+)+", "", t)
+    t = re.sub(r"(?:\s+(?:please|turo))+$", "", t)
+    return next((cmd for cmd, phrases in COMMANDS.items() if t in phrases), None)
+
+
+def handle_speech(text):
+    cmd = command_of(text)
+    print(f"[voice] heard {text!r} -> {cmd or 'question'}")
+    if cmd == "next":
+        start_step()
+    elif cmd == "stop":
+        stop_all()
+    elif cmd == "repeat" and state["last"]:
+        say_and_show(*state["last"])
+    elif cmd == "agent":
+        start_agent()
+    else:
+        state["hwnd"] = auto.GetForegroundWindow()
+        new_question(text)
+
+
+def on_wake():
+    state["gen"] += 1
+    bridge.show.emit(None, "Yes? I'm listening…")
+    bridge.mode.emit("listening")
 
 
 # --- F9: type a question -----------------------------------------------------------
@@ -131,7 +178,7 @@ def ask_question():
     dlg = QInputDialog()
     dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
     dlg.setWindowTitle("Turo")
-    dlg.setLabelText("Ano ang gusto mong gawin?")
+    dlg.setLabelText("What do you want to do?")
     dlg.show()
     dlg.raise_()
     dlg.activateWindow()
@@ -139,7 +186,7 @@ def ask_question():
         new_question(dlg.textValue().strip())
 
 
-# --- hold Win+Alt: ask by voice ----------------------------------------------------
+# --- hold Win+Alt: push-to-talk ------------------------------------------------------
 held = set()
 
 
@@ -171,7 +218,8 @@ def on_talk_down():
         mask_modifiers()
         state["hwnd"] = auto.GetForegroundWindow()
         state["gen"] += 1
-        bridge.show.emit(None, "🎙️ Nakikinig ako... (bitawan ang Win+Alt kapag tapos na)")
+        bridge.show.emit(None, "Listening… let go of Win+Alt when you're done.")
+        bridge.mode.emit("listening")
         voice.start()
 
 
@@ -183,9 +231,9 @@ def on_talk_up():
     def work():
         text = voice.stop_and_transcribe()
         if text:
-            new_question(text)
+            handle_speech(text)
         else:
-            bridge.show.emit(None, "Hindi kita narinig. Subukan ulit.")
+            bridge.show.emit(None, "I didn't catch that. Hold Win+Alt and try again.")
 
     threading.Thread(target=work, daemon=True).start()
 
@@ -193,6 +241,7 @@ def on_talk_up():
 # --- F7: agent mode, Esc: stop -----------------------------------------------------
 def run_agent():
     state["stop"], state["history"] = False, []
+    bridge.mode.emit("reset")
     try:
         with auto.UIAutomationInitializerInThread():
             for _ in range(MAX_AGENT_STEPS):
@@ -204,15 +253,16 @@ def run_agent():
                 if not rect:
                     break
                 if any(word in label.lower() for word in RISKY):
-                    say_and_show(rect, "Ikaw na ang mag-click nito. " + say)
+                    say_and_show(rect, "You click this one yourself. " + say)
                     break
-                time.sleep(1.5)   # show the pointer before clicking
+                time.sleep(1.8)   # let the pointer fly and land before clicking
                 if state["stop"]:
                     break
                 left, top, right, bottom = rect
                 auto.Click(int((left + right) / 2), int((top + bottom) / 2))
                 if done:
-                    say_and_show(None, "Tapos na! 🎉")
+                    say_and_show(None, "All done! 🎉")
+                    bridge.mode.emit("done")
                     break
                 time.sleep(1.0)   # let the app redraw
     except Exception as err:
@@ -236,13 +286,14 @@ def stop_all():
 # --- F6: one-time cloud ask (only after the user presses it) ------------------------
 def ask_cloud():
     if not brain.cloud:
-        bridge.show.emit(None, "Walang cloud na naka-set. Ilagay ang TURO_CLOUD_URL / MODEL / KEY.")
+        bridge.show.emit(None, "Cloud isn't set up. Set TURO_CLOUD_URL, TURO_CLOUD_MODEL and TURO_CLOUD_KEY.")
     elif state["question"]:
         start_step(use_cloud=True)
 
 
 bridge.ask.connect(ask_question)
 bridge.show.connect(overlay.point_at)
+bridge.mode.connect(overlay.set_mode)
 bridge.clear.connect(overlay.clear)
 keyboard.add_hotkey(ASK_KEY, on_ask_key, suppress=True)
 keyboard.add_hotkey(NEXT_KEY, start_step, suppress=True)
@@ -251,7 +302,8 @@ keyboard.add_hotkey(CLOUD_KEY, ask_cloud, suppress=True)
 keyboard.add_hotkey("esc", stop_all)
 if voice:
     keyboard.hook(on_any_key)   # not suppressed: Win and Alt must keep working normally
-print(f"Turo ready. {ASK_KEY.upper()} type, hold Win+Alt talk, {NEXT_KEY.upper()} next, "
-      f"{AGENT_KEY.upper()} do it for me, Esc stop, {CLOUD_KEY.upper()} cloud"
-      f"{'' if brain.cloud else ' (not set)'}.")
+    if WAKE_WORD:
+        voice.listen(on_wake, handle_speech, busy=speak.is_busy if speak else None)
+print(f"Turo ready. Say \"Hey Turo\"{'' if voice and WAKE_WORD else ' (off)'}, hold Win+Alt to talk, "
+      f"{ASK_KEY.upper()} type, {NEXT_KEY.upper()} next, {AGENT_KEY.upper()} do it for me, Esc stop.")
 sys.exit(app.exec())
