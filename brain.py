@@ -112,32 +112,42 @@ def _pick(question, app_title, items, history, use_cloud=False):
     return _parse(_chat(SYSTEM, user, use_cloud))
 
 
-VISION_SYSTEM = """You are Turo, an on-screen tutor. You see a screenshot of the app the user is using.
-Find the ONE element the user should click next to do their task.
-Reply with JSON only: {"x": number, "y": number, "say": string, "done": boolean}
-- x, y: the center of that element, in a 0-1000 grid over the screenshot (0,0 top-left, 1000,1000 bottom-right).
-  Use -1, -1 if the element is not visible.
-- say: one short sentence telling the user what to click and why. Use the user's language; if they wrote Taglish, answer in Taglish.
-- done: true only when the task is finished after this click."""
+VISION_SYSTEM = """You are Turo, an on-screen tutor for Windows. You see a screenshot of the user's screen.
+Look at it carefully: which app is open, which tab or menu is showing, what is already done.
+Then find the ONE element the user should click next to do their task.
+Reply with JSON only:
+{"bbox_2d": [x1, y1, x2, y2], "label": string, "say": string, "done": boolean}
+- bbox_2d: box around that element on a 0-1000 grid over the screenshot (0,0 = top-left, 1000,1000 = bottom-right).
+  Use [] if the element is not visible anywhere.
+- label: the element's visible text or name, e.g. "View", "Freeze Panes", "New folder".
+- say: one short, friendly sentence telling the user what to click and why. Use the user's language.
+- done: true only when the task is finished after this click.
+Rules: tabs, menus and buttons must be visible in the screenshot to be picked. If the needed feature is not
+visible, pick the tab or menu that opens it. Do not pick something the steps already shown say was clicked."""
 
 
 def locate(question, app_title, image_b64, history, use_cloud=False):
-    """Vision fallback for apps without usable UI Automation controls. Returns x, y in 0-1000 or None."""
+    """Main path: the vision model reads the screenshot. Returns the box center in 0-1000, or None."""
     shown = "\n".join(f"- {h}" for h in history) or "none"
-    text = f"Question: {question}\nApp window: {app_title}\nSteps already shown:\n{shown}"
-    content = [{"type": "text", "text": text},
-               {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}]
+    text = f"Task: {question}\nApp in front: {app_title}\nSteps already shown:\n{shown}"
+    content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+               {"type": "text", "text": text}]
     t = time.time()
     raw = _chat(VISION_SYSTEM, content, use_cloud)
     start, end = raw.find("{"), raw.rfind("}")
+    point, data = None, {}
     try:
         data = json.loads(raw[start:end + 1]) if start != -1 and end > start else {}
-        x, y = float(data.get("x", -1)), float(data.get("y", -1))
-    except (json.JSONDecodeError, TypeError, ValueError):
-        data, x, y = {}, -1, -1
-    point = (x, y) if 0 <= x <= 1000 and 0 <= y <= 1000 else None
+        box = [float(v) for v in data.get("bbox_2d") or []]
+        if len(box) == 4 and all(0 <= v <= 1000 for v in box):
+            point = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
+        elif len(box) == 2 and all(0 <= v <= 1000 for v in box):
+            point = (box[0], box[1])
+    except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+        pass
     say = str(data.get("say") or "").strip() or FALLBACK_SAY
-    reply = {"point": point, "say": say, "done": data.get("done") is True}
+    reply = {"point": point, "label": str(data.get("label") or "").strip(), "say": say,
+             "done": data.get("done") is True}
     print(f"[brain] vision {time.time() - t:.1f}s {reply}")
     return reply
 

@@ -22,8 +22,10 @@ That guide is the source of truth for scope and order; this file adds verified A
 
 ## Hard rules
 
-- **Pointing order:** UIA first (model plans the click path once, code matches it to UIA controls, so
-  coordinates are exact). Only when no control matches: screenshot → qwen3-vl point on a 0-1000 grid.
+- **Pointing order (user wants visual recognition, 07:10):** every step screenshots the app's whole monitor →
+  qwen3-vl returns `bbox_2d` (0-1000 grid) + label + say → `screen.snap` sharpens it to the UIA control
+  (same-named TabItem first, then nearest same name, then smallest control under the point). Only if vision
+  finds nothing: text plan/match over UIA names. Warm vision call ≈ 1 s.
 - **Goal (user, 05:55):** a Clicky-like app (heyclicky.com) that runs locally, in any app. Write our own
   code — never clone or copy clicky / clicky-windows code.
 - **Offline by default.** Features 1–7 must work with Wi-Fi off. Cloud (F6) is only ever called after the

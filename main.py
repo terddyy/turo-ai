@@ -62,18 +62,20 @@ def say_and_show(rect, text):
 
 
 def compute_step(use_cloud=False):
-    """One look at the screen. Returns (rect, say, done, label). Caller holds the UIA initializer."""
+    """One look at the screen. Returns (rect, say, done, label). Caller holds the UIA initializer.
+    Vision first: the model reads a screenshot and decides. UI Automation only sharpens the box."""
     title, items = screen.list_controls(state["hwnd"])
+    image, (ml, mt, mw, mh) = screen.grab(state["hwnd"])
+    seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud)
+    if seen["point"]:
+        x, y = ml + seen["point"][0] * mw / 1000, mt + seen["point"][1] * mh / 1000
+        rect, name = screen.snap(x, y, seen["label"], items)
+        return rect, seen["say"], seen["done"], name or seen["label"]
+    # The model saw nothing to click: fall back to reasoning over the control names.
     reply = brain.next_step(state["question"], title, items, state["history"], use_cloud=use_cloud)
     hit = next((i for i in items if i["id"] == reply["id"]), None)
     if hit:
         return hit["rect"], reply["say"], reply["done"], hit["name"]
-    # No usable control (browser, game, custom UI): read the screenshot instead.
-    image, (wl, wt, ww, wh) = screen.grab(state["hwnd"])
-    seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud)
-    if seen["point"]:
-        x, y = wl + seen["point"][0] * ww / 1000, wt + seen["point"][1] * wh / 1000
-        return (x - 18, y - 18, x + 18, y + 18), seen["say"], seen["done"], seen["say"]
     return None, seen["say"], False, ""
 
 
