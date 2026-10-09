@@ -14,13 +14,18 @@ That guide is the source of truth for scope and order; this file adds verified A
   no type-hint campaigns. Each module gets a `if __name__ == "__main__":` smoke test (as in the guide).
 - **Build order is fixed** (features 1→8, files config → screen → brain → overlay → main → voice → speak).
   Each step must leave a runnable product. Skip a feature that overruns its slot; never break an earlier one.
-- **Feature freeze at 8:20.** After that: only the worst-bug fix, README, video.
+- **Feature freeze at 8:45** (moved from 8:20 by the user; do not push it later). After that: only the
+  worst-bug fix, README, video. 8:45 rehearse (Wi-Fi off) → 9:00 video + README + key check + repo public
+  → 9:30 post on X/LinkedIn → 9:40 submit (check every field) → 10 min slack.
 - **Skip order if late:** hybrid → agent → spoken reply → voice. Features 1–4 are the product.
 - Only add the packages in `requirements.txt`. Ask before any other dependency.
 
 ## Hard rules
 
-- **The model never guesses pixels.** It returns a control `id`; coordinates come only from UIA rects.
+- **Pointing order:** UIA first (model plans the click path once, code matches it to UIA controls, so
+  coordinates are exact). Only when no control matches: screenshot → qwen3-vl point on a 0-1000 grid.
+- **Goal (user, 05:55):** a Clicky-like app (heyclicky.com) that runs locally, in any app. Write our own
+  code — never clone or copy clicky / clicky-windows code.
 - **Offline by default.** Features 1–7 must work with Wi-Fi off. Cloud (F6) is only ever called after the
   user presses F6 following the on-screen warning. Never auto-fallback to cloud.
 - **No secrets in the repo** — the repo goes public. Cloud settings come only from env vars
@@ -44,7 +49,9 @@ That guide is the source of truth for scope and order; this file adds verified A
 ## Machine (checked 04:45 Oct 10)
 
 - Windows 11, **Python 3.10.0**, git present. **Ollama not yet installed** at time of check.
-- GPU: RTX 3060 Laptop (6 GB VRAM). `qwen3-vl:4b` (3.3 GB) only — **do not switch to 8b**.
+- GPU: RTX 3060 Laptop (6 GB VRAM). Model: **`qwen3-vl:4b-instruct`** (the plain `qwen3-vl:4b` tag always
+  thinks: 26 s to minutes per step). **Do not switch to 8b.** Keep context 4096 (8192 spills to CPU).
+- Python 3.10.0 needs `pydantic<2.12`. Two monitors: external 1920×1080 @100% (primary) + laptop @150%.
 - ~4 GB free RAM with Chrome open → close Chrome/heavy apps before testing.
 - Display 2560×1600 with Windows scaling on (fractional DPR expected, e.g. 1.5).
 

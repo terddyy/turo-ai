@@ -1,7 +1,11 @@
+import base64
+import io
 import time
 import unicodedata
 
+import mss
 import uiautomation as auto
+from PIL import Image
 
 from config import MAX_ITEMS
 
@@ -34,9 +38,11 @@ def _walk(ctrl, depth, items, max_items, max_depth):
             if name:
                 r = child.BoundingRectangle
                 if r.width() > 0 and r.height() > 0:
+                    # The model needs to know which ribbon tab is already open.
+                    selected = kind == "TabItemControl" and child.GetSelectionItemPattern().IsSelected
                     items.append({
                         "id": len(items) + 1,
-                        "type": kind.replace("Control", ""),
+                        "type": kind.replace("Control", "") + (" (selected)" if selected else ""),
                         "name": name[:60],
                         "rect": (r.left, r.top, r.right, r.bottom),
                     })
@@ -57,6 +63,20 @@ def list_controls(handle=None, max_items=MAX_ITEMS, max_depth=16):
     for root in roots:
         _walk(root, 0, items, max_items, max_depth)
     return win.Name, items
+
+
+def grab(handle, max_side=960):
+    """Screenshot of the window as base64 JPEG, plus how to map image px back to screen px."""
+    win = auto.ControlFromHandle(handle) if handle else auto.GetForegroundControl().GetTopLevelControl()
+    r = win.BoundingRectangle
+    box = {"left": r.left, "top": r.top, "width": max(r.width(), 1), "height": max(r.height(), 1)}
+    with mss.MSS() as s:
+        shot = s.grab(box)
+    img = Image.frombytes("RGB", shot.size, shot.rgb)
+    img.thumbnail((max_side, max_side))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=80)
+    return base64.b64encode(buf.getvalue()).decode(), (r.left, r.top, box["width"], box["height"])
 
 
 if __name__ == "__main__":
