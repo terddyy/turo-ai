@@ -270,7 +270,7 @@ class Overlay(QWidget):
             p.setFont(QFont("Segoe UI", 8))
             p.setPen(QColor("#94a3b8"))
             p.drawText(QRectF(bubble.left() + 18, bubble.bottom() - foot - 6, inner, foot), int(Qt.AlignLeft),
-                       "Click the highlighted spot · say \"next\" or \"do it\" · Esc to stop")
+                       "Click the highlighted spot · say \"next\", \"do it\" or ask a follow-up · Esc to stop")
         p.setOpacity(1.0)
 
 

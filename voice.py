@@ -12,9 +12,12 @@ from config import PARAKEET_DIR
 SR = 16000
 BLOCK = 1600   # 100 ms
 MIN_RMS = 0.004   # quieter than this is silence; Parakeet invents "Thank you." from silence
-# "Hey" + anything like turo/turrow/toro/taro, or a bare "Turo". Parakeet heard "Hey Turrow" in testing.
-WAKE = re.compile(r"^\W*(?:(?:hey|hi|hay|a|okay|ok)\W+(?:t[aeiou]{1,2}r+[aeiou]{0,2}w?|tudo|duro|truro|tour o|two row)"
+# "Hey" + anything like turo/turrow/toro/taro, or a bare "Turo", anywhere in the phrase ("uh, hey Turo, ...").
+# Parakeet heard "Hey Turrow" in testing.
+WAKE = re.compile(r"(?<![a-z])(?:(?:hey|hi|hay|okay|ok)\W+(?:t[aeiou]{1,2}r+[aeiou]{0,2}w?|tudo|duro|truro|tour o)"
                   r"|turo|toro|turrow)\b\W*", re.IGNORECASE)
+FILLERS = re.compile(r"(?<![a-z])(?:uh+|um+|uhm+|erm|er|ah+|hmm+|you know)(?![a-z])[,.]?\s*", re.IGNORECASE)
+FOLLOW_UP_S = 8   # after Turo speaks, listen this long for a follow-up without "Hey Turo"
 
 # Parakeet TDT 0.6B v3 (English), int8 on CPU: ~0.4 s per phrase. Load once: takes seconds.
 model = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", PARAKEET_DIR, quantization="int8")
@@ -62,10 +65,27 @@ def stop_and_transcribe():
 
 
 # --- "Hey Turo" --------------------------------------------------------------------
+def clean(text):
+    """Drop fillers like "uh", "um" so the model sees the actual question."""
+    return " ".join(FILLERS.sub("", text).split()).strip(" ,.")
+
+
 def strip_wake(text):
-    """Returns the words after the wake word, or None if the wake word isn't there."""
-    m = WAKE.match(text)
-    return text[m.end():].strip() if m else None
+    """The request around the wake word ("" if only the name was said), or None if there's no wake word."""
+    m = WAKE.search(text)
+    if not m:
+        return None
+    after, before = clean(text[m.end():]), clean(text[:m.start()])
+    return after if after or len(before.split()) < 3 else before   # "how do I X, hey Turo" works too
+
+
+_expect_until = 0.0
+
+
+def expect(seconds=FOLLOW_UP_S):
+    """Treat the next phrase within `seconds` as a request, no wake word needed (conversation mode)."""
+    global _expect_until
+    _expect_until = time.time() + seconds
 
 
 def _utterances():
@@ -89,31 +109,34 @@ def _utterances():
                     yield clip
 
 
-def _listen_loop(on_wake, on_followup):
-    expect_until = 0.0   # after a bare "Hey Turo", the next phrase is the question
+def _listen_loop(on_wake, on_request):
+    global _expect_until
     for clip in _utterances():
         if _recording or _busy():
             continue
         text = transcribe(clip)
         if not text:
             continue
-        if time.time() < expect_until:
-            expect_until = 0.0
-            on_followup(text)
-            continue
         rest = strip_wake(text)
+        if rest is None and time.time() < _expect_until:   # follow-up inside the conversation window
+            _expect_until = 0.0
+            if clean(text):
+                on_request(clean(text), True)
+            continue
         if rest is None:
             continue
         print(f"[voice] wake: {text!r}")
+        _expect_until = 0.0
         if len(rest.split()) >= 2:
-            on_followup(rest)
+            on_request(rest, False)
         else:
-            expect_until = time.time() + 7
+            expect(7)
             on_wake()
 
 
 def listen(on_wake, on_followup, busy=None):
-    """Background "Hey Turo" listener. on_wake(): heard the name only. on_followup(text): a request."""
+    """Background "Hey Turo" listener. on_wake(): heard the name only.
+    on_followup(text, is_follow_up): a request; is_follow_up=True when said inside the conversation window."""
     global _busy, _listening
     _listening = True
     if busy:
@@ -122,8 +145,8 @@ def listen(on_wake, on_followup, busy=None):
 
 
 if __name__ == "__main__":
-    print("Say: 'Hey Turo, paano i-freeze ang top row?' (Ctrl+C to quit)")
+    print("Say: 'Hey Turo, how do I freeze the top row?' (Ctrl+C to quit)")
     listen(lambda: print("-> wake only, listening for the question"),
-           lambda text: print("-> request:", text))
+           lambda text, follow: print("-> request:", text, "(follow-up)" if follow else ""))
     while True:
         time.sleep(1)

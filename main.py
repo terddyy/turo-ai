@@ -135,6 +135,7 @@ def run_step(use_cloud):
         with auto.UIAutomationInitializerInThread():
             step = compute_step(use_cloud)
         present(step, "[CLOUD] " if use_cloud else "")
+        open_follow_up()
         if step["action"] == "explain":
             bridge.mode.emit("reset")
         elif step["rect"]:
@@ -151,7 +152,7 @@ def start_step(use_cloud=False):
     if not state["question"] or not busy.acquire(blocking=False):
         return
     state["gen"] += 1   # cancels the previous click watcher
-    bridge.show.emit(None, f'"{state["question"]}"')
+    bridge.show.emit(None, f'"{state["question"].split(" (follow-up")[0]}"')
     bridge.mode.emit("thinking")
     threading.Thread(target=run_step, args=(use_cloud,), daemon=True).start()
 
@@ -170,9 +171,9 @@ def command_of(text):
     return next((cmd for cmd, phrases in COMMANDS.items() if t in phrases), None)
 
 
-def handle_speech(text):
+def handle_speech(text, follow_up=False):
     cmd = command_of(text)
-    print(f"[voice] heard {text!r} -> {cmd or 'question'}")
+    print(f"[voice] heard {text!r} -> {cmd or ('follow-up' if follow_up else 'question')}")
     if cmd == "next":
         start_step()
     elif cmd == "stop":
@@ -183,7 +184,24 @@ def handle_speech(text):
         start_agent()
     else:
         state["hwnd"] = auto.GetForegroundWindow()
+        if follow_up and state["question"]:   # keep the thread of the conversation
+            text = f"{text} (follow-up; earlier the user asked: {state['question'].split(' (follow-up')[0]})"
         new_question(text)
+
+
+def open_follow_up():
+    """Conversation mode: once Turo stops talking, the next phrase needs no "Hey Turo"."""
+    if not (voice and WAKE_WORD):
+        return
+
+    def wait():
+        for _ in range(300):   # up to 30 s of speech
+            if not (speak and speak.is_busy()):
+                break
+            time.sleep(0.1)
+        voice.expect()
+
+    threading.Thread(target=wait, daemon=True).start()
 
 
 def on_wake():
