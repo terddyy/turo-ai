@@ -92,6 +92,14 @@ def in_session():
     return time.time() < _expect_until
 
 
+def set_listening(on):
+    """Pause or resume "Hey Turo" (push-to-talk still works)."""
+    global _listening
+    _listening = bool(on)
+    if not on:
+        expect(0)
+
+
 def _utterances():
     """Yields one numpy clip per spoken phrase, using a simple loudness gate."""
     noise, buf, speaking, quiet = 0.005, [], False, 0

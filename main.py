@@ -1,19 +1,28 @@
 import ctypes
 import ctypes.wintypes
+import json
+import os
 import re
 import sys
 import threading
 import time
+import urllib.request
+
+import home
+
+if sys.stdout is None:   # started without a console (pythonw / desktop shortcut): log to a file
+    home.DATA.mkdir(parents=True, exist_ok=True)
+    sys.stdout = sys.stderr = open(home.DATA / "turo.log", "a", encoding="utf-8", buffering=1)
 
 import keyboard
 import uiautomation as auto
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import QApplication, QInputDialog
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtWidgets import QApplication
 
 import brain
 import screen
 import skills
-from config import AGENT_KEY, ASK_KEY, CLOUD_KEY, MAX_AGENT_STEPS, NEXT_KEY, WAKE_WORD
+from config import AGENT_KEY, ASK_KEY, BASE_URL, CLOUD_KEY, MAX_AGENT_STEPS, MODEL, NEXT_KEY, WAKE_WORD
 from overlay import Overlay
 
 try:
@@ -61,6 +70,7 @@ def say_and_show(rect, text, spoken=None):
     state["last"] = (rect, text)
     bridge.show.emit(rect, text)
     if speak:
+        speak.stop()   # never talk over ourselves
         speak.speak(spoken or text)
 
 
@@ -161,6 +171,8 @@ def start_step(use_cloud=False):
 
 def new_question(text):
     state["question"], state["history"] = text, []
+    if " (follow-up" not in text:
+        home.add_history(text, state.get("app_title", ""))
     bridge.mode.emit("reset")
     start_step()
 
@@ -217,20 +229,34 @@ def on_wake():
 
 # --- F9: type a question -----------------------------------------------------------
 def on_ask_key():
-    state["hwnd"] = auto.GetForegroundWindow()   # remember the app before Turo takes focus
+    track_app()   # remember the app before Turo takes focus
     bridge.ask.emit()
 
 
-def ask_question():
-    dlg = QInputDialog()
-    dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowStaysOnTopHint)
-    dlg.setWindowTitle("Turo")
-    dlg.setLabelText("What do you want to do?")
-    dlg.show()
-    dlg.raise_()
-    dlg.activateWindow()
-    if dlg.exec() and dlg.textValue().strip():
-        new_question(dlg.textValue().strip())
+def on_home_ask(text):
+    """A question typed in Home: put the app the user was using back in front, then look at it."""
+    hwnd = state.get("app_hwnd")
+    if hwnd:
+        state["hwnd"] = hwnd
+        user32.SetForegroundWindow(hwnd)
+
+    def go():
+        time.sleep(0.35)   # let Home disappear and the app repaint before the screenshot
+        new_question(text)
+
+    threading.Thread(target=go, daemon=True).start()
+
+
+def track_app():
+    """Remember the last real app window in front (not Turo itself), for questions typed in Home."""
+    hwnd = user32.GetForegroundWindow()
+    pid = ctypes.wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if hwnd and pid.value != os.getpid():
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, buf, 256)
+        if buf.value:
+            state["app_hwnd"], state["app_title"] = hwnd, buf.value
 
 
 # --- hold Win+Alt: push-to-talk ------------------------------------------------------
@@ -333,6 +359,8 @@ def start_agent():
 def stop_all():
     state["stop"] = True
     state["gen"] += 1
+    if speak:
+        speak.stop()
     if voice:
         voice.expect(0)   # end the session: back to waiting for "Hey Turo"
     bridge.clear.emit()
@@ -346,7 +374,72 @@ def ask_cloud():
         start_step(use_cloud=True)
 
 
-bridge.ask.connect(ask_question)
+# --- Home window, tray, settings, status ---------------------------------------------
+settings = home.load_settings()
+status = {"Local AI": (False, "checking…")}
+
+
+def check_ai():
+    while True:
+        try:
+            with urllib.request.urlopen(BASE_URL.replace("/v1", "/api/tags"), timeout=3) as r:
+                names = [m["name"] for m in json.load(r).get("models", [])]
+            status["Local AI"] = ((MODEL in names), MODEL + (" ready" if MODEL in names else " not downloaded"))
+        except Exception:
+            status["Local AI"] = (False, "Ollama isn't running: start it, then wait a moment")
+        time.sleep(5)
+
+
+def get_status():
+    listening = bool(voice and settings.get("wake"))
+    return {
+        "Local AI": status["Local AI"],
+        "Microphone": (voice is not None, "on" if voice else "not found: typing still works"),
+        "Voice": (bool(speak) and settings.get("speak"),
+                  (speak.engine_name if speak else "off") + ("" if settings.get("speak") else " (muted)")),
+        "Listening": (listening, "say “Hey Turo”" if listening else "paused: press F9 to type"),
+    }
+
+
+def apply_setting(key, value):
+    settings[key] = value
+    home.save_settings(settings)
+    if key == "speak" and speak:
+        speak.enabled = value
+        if not value:
+            speak.stop()
+    elif key == "voice" and speak:
+        speak.voice = value
+        speak.speak("Hi, this is my new voice.")
+    elif key == "wake" and voice:
+        voice.set_listening(value)
+    tray.setToolTip("Turo: say “Hey Turo”" if settings.get("wake") else "Turo: listening paused (F9 to type)")
+
+
+def toggle_listening():
+    apply_setting("wake", not settings.get("wake"))
+
+
+def quit_app():
+    tray.hide()
+    app.quit()
+
+
+skill_list = [(body.splitlines()[0].replace("SKILL:", "").split("(")[0].split(".")[0].strip(), words)
+              for _name, words, body in skills.SKILLS]
+win = home.Home(settings, skill_list, get_status, speak.VOICES if speak else {})
+win.ask.connect(on_home_ask)
+win.setting_changed.connect(apply_setting)
+tray = home.Tray(win, lambda: (track_app(), win.open_ask()), toggle_listening, quit_app)
+app.setWindowIcon(home.make_icon())
+if speak:
+    speak.enabled, speak.voice = settings.get("speak", True), settings.get("voice", "af_heart")
+threading.Thread(target=check_ai, daemon=True).start()
+app_timer = QTimer()
+app_timer.timeout.connect(track_app)
+app_timer.start(500)
+
+bridge.ask.connect(win.open_ask)
 bridge.show.connect(overlay.point_at)
 bridge.mode.connect(overlay.set_mode)
 bridge.clear.connect(overlay.clear)
@@ -360,6 +453,11 @@ if voice:
     keyboard.hook(on_any_key)   # not suppressed: Win and Alt must keep working normally
     if WAKE_WORD:
         voice.listen(on_wake, handle_speech, busy=speak.is_busy if speak else None)
+        voice.set_listening(settings.get("wake", True))
 print(f"Turo ready. Say \"Hey Turo\"{'' if voice and WAKE_WORD else ' (off)'}, hold Win+Alt to talk, "
       f"{ASK_KEY.upper()} type, {NEXT_KEY.upper()} next, {AGENT_KEY.upper()} do it for me, Esc stop.")
+if settings.get("onboarded"):
+    win.show_front()
+else:
+    win.show_tour()   # first run: the tour
 sys.exit(app.exec())
