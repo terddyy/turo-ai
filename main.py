@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog
 
 import brain
 import screen
+import skills
 from config import AGENT_KEY, ASK_KEY, CLOUD_KEY, MAX_AGENT_STEPS, NEXT_KEY, WAKE_WORD
 from overlay import Overlay
 
@@ -32,6 +33,7 @@ class Bridge(QObject):
     ask = Signal()                # hotkey thread -> Qt thread
     show = Signal(object, str)    # worker thread -> Qt thread
     mode = Signal(str)            # listening / thinking / done / reset
+    copy = Signal(str)            # example prompt -> clipboard (Qt thread only)
     clear = Signal()
 
 
@@ -54,29 +56,48 @@ COMMANDS = {
 }
 
 
-def say_and_show(rect, text):
+def say_and_show(rect, text, spoken=None):
     state["last"] = (rect, text)
     bridge.show.emit(rect, text)
     if speak:
-        speak.speak(text)
+        speak.speak(spoken or text)
 
 
 def compute_step(use_cloud=False):
-    """One look at the screen. Returns (rect, say, done, label). Caller holds the UIA initializer.
+    """One look at the screen. Caller holds the UIA initializer.
+    Returns {action: click/type/explain, rect, say, text, done, label}.
     Vision first: the model reads a screenshot and decides. UI Automation only sharpens the box."""
     title, items = screen.list_controls(state["hwnd"])
+    skill = skills.for_app(title, screen.exe_of(state["hwnd"]))
     image, (ml, mt, mw, mh) = screen.grab(state["hwnd"])
-    seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud)
+    seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud, skill=skill)
+    step = {"action": seen["action"], "rect": None, "say": seen["say"], "text": seen["text"],
+            "done": seen["done"], "label": seen["label"]}
+    if seen["action"] == "explain":   # an answer, not a click: no box
+        step["done"] = True
+        return step
     if seen["point"]:
         x, y = ml + seen["point"][0] * mw / 1000, mt + seen["point"][1] * mh / 1000
-        rect, name = screen.snap(x, y, seen["label"], items)
-        return rect, seen["say"], seen["done"], name or seen["label"]
+        step["rect"], name = screen.snap(x, y, seen["label"], items, action=seen["action"])
+        step["label"] = name or seen["label"]
+        return step
     # The model saw nothing to click: fall back to reasoning over the control names.
-    reply = brain.next_step(state["question"], title, items, state["history"], use_cloud=use_cloud)
+    reply = brain.next_step(state["question"], title, items, state["history"], use_cloud=use_cloud, skill=skill)
     hit = next((i for i in items if i["id"] == reply["id"]), None)
     if hit:
-        return hit["rect"], reply["say"], reply["done"], hit["name"]
-    return None, seen["say"], False, ""
+        step.update(action="click", rect=hit["rect"], say=reply["say"], done=reply["done"], label=hit["name"])
+    return step
+
+
+def present(step, prefix=""):
+    """Show and speak one step. For typing steps, the example goes to the clipboard."""
+    say = prefix + step["say"]
+    if step["action"] == "type" and step["text"]:
+        bridge.copy.emit(step["text"])
+        say_and_show(step["rect"], f'{say}\nTry: "{step["text"]}"  (copied: press Ctrl+V)', spoken=say)
+    else:
+        say_and_show(step["rect"], say)
+    state["history"].append(say)
 
 
 def finish(gen):
@@ -87,17 +108,17 @@ def finish(gen):
         bridge.clear.emit()
 
 
-def watch_click(rect, done, gen):
-    """Auto-advance: a click inside the highlighted box moves to the next step."""
+def watch(rect, done, gen, key):
+    """Auto-advance. key 0x01: a click inside the highlighted box. key 0x0D: Enter (sent a typed prompt)."""
     left, top, right, bottom = rect
     was_down = False
     while state["gen"] == gen:
-        down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)   # left mouse button
+        down = bool(user32.GetAsyncKeyState(key) & 0x8000)
         if was_down and not down:
             pt = ctypes.wintypes.POINT()
             user32.GetCursorPos(ctypes.byref(pt))
-            if left - 8 <= pt.x <= right + 8 and top - 8 <= pt.y <= bottom + 8:
-                time.sleep(1.0)   # let the app redraw
+            if key != 0x01 or (left - 8 <= pt.x <= right + 8 and top - 8 <= pt.y <= bottom + 8):
+                time.sleep(1.0 if key == 0x01 else 2.5)   # let the app redraw / the AI start answering
                 if state["gen"] != gen:
                     return
                 if done:
@@ -112,13 +133,14 @@ def watch_click(rect, done, gen):
 def run_step(use_cloud):
     try:
         with auto.UIAutomationInitializerInThread():
-            rect, say, done, _ = compute_step(use_cloud)
-        say = ("[CLOUD] " if use_cloud else "") + say
-        state["history"].append(say)
-        say_and_show(rect, say)
-        if rect:
-            gen = state["gen"]
-            threading.Thread(target=watch_click, args=(rect, done, gen), daemon=True).start()
+            step = compute_step(use_cloud)
+        present(step, "[CLOUD] " if use_cloud else "")
+        if step["action"] == "explain":
+            bridge.mode.emit("reset")
+        elif step["rect"]:
+            key = 0x0D if step["action"] == "type" else 0x01
+            threading.Thread(target=watch, args=(step["rect"], step["done"], state["gen"], key),
+                             daemon=True).start()
     except Exception as err:
         bridge.show.emit(None, f"Error: {err}")
     finally:
@@ -249,20 +271,26 @@ def run_agent():
             for _ in range(MAX_AGENT_STEPS):
                 if state["stop"]:
                     break
-                rect, say, done, label = compute_step()
-                state["history"].append(say)
-                say_and_show(rect, say)
-                if not rect:
+                step = compute_step()
+                present(step)
+                rect = step["rect"]
+                if step["action"] == "explain" or not rect:
                     break
-                if any(word in label.lower() for word in RISKY):
-                    say_and_show(rect, "You click this one yourself. " + say)
+                if any(word in step["label"].lower() for word in RISKY):
+                    say_and_show(rect, "You click this one yourself. " + step["say"])
                     break
                 time.sleep(1.8)   # let the pointer fly and land before clicking
                 if state["stop"]:
                     break
                 left, top, right, bottom = rect
                 auto.Click(int((left + right) / 2), int((top + bottom) / 2))
-                if done:
+                if step["action"] == "type" and step["text"]:
+                    time.sleep(0.4)
+                    keyboard.write(step["text"], delay=0.01)
+                    # Never press Enter for the user: sending a message is their call.
+                    say_and_show(rect, "I typed it in. Read it, then press Enter or Send when you're ready.")
+                    break
+                if step["done"]:
                     say_and_show(None, "All done! 🎉")
                     bridge.mode.emit("done")
                     break
@@ -297,6 +325,7 @@ bridge.ask.connect(ask_question)
 bridge.show.connect(overlay.point_at)
 bridge.mode.connect(overlay.set_mode)
 bridge.clear.connect(overlay.clear)
+bridge.copy.connect(lambda text: app.clipboard().setText(text))
 keyboard.add_hotkey(ASK_KEY, on_ask_key, suppress=True)
 keyboard.add_hotkey(NEXT_KEY, start_step, suppress=True)
 keyboard.add_hotkey(AGENT_KEY, start_agent, suppress=True)

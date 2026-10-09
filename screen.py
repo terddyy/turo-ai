@@ -1,6 +1,9 @@
 import base64
+import ctypes
+import ctypes.wintypes
 import io
 import math
+import re
 import time
 import unicodedata
 
@@ -66,6 +69,21 @@ def list_controls(handle=None, max_items=MAX_ITEMS, max_depth=16):
     return win.Name, items
 
 
+def exe_of(handle):
+    """Program file name of a window, e.g. 'EXCEL.EXE' (used to pick the app's skill)."""
+    pid = ctypes.wintypes.DWORD()
+    ctypes.windll.user32.GetWindowThreadProcessId(handle, ctypes.byref(pid))
+    proc = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid.value)   # QUERY_LIMITED_INFORMATION
+    if not proc:
+        return ""
+    try:
+        buf, size = ctypes.create_unicode_buffer(520), ctypes.wintypes.DWORD(520)
+        ok = ctypes.windll.kernel32.QueryFullProcessImageNameW(proc, 0, buf, ctypes.byref(size))
+        return buf.value.rsplit("\\", 1)[-1] if ok else ""
+    finally:
+        ctypes.windll.kernel32.CloseHandle(proc)
+
+
 def grab(handle, max_side=1280):
     """Screenshot of the whole monitor the app is on (so open menus are included), as base64 JPEG,
     plus (left, top, width, height) to map the model's 0-1000 grid back to screen px."""
@@ -88,10 +106,14 @@ def _norm(name):
     return " ".join(name.lower().replace("...", "").replace("&", "and").split())
 
 
-def snap(x, y, label, items, reach=160):
+LABEL_NOISE = re.compile(r"\s+(tab|button|icon|menu|option|link|box|field|dropdown)$", re.IGNORECASE)
+
+
+def snap(x, y, label, items, reach=160, action="click"):
     """Turn the model's point into an exact box. Prefer a control named like the model's label
     near the point (fixes small aim errors), else the smallest control under the point.
     Returns (rect, name) or a small box around the point when the app exposes no controls."""
+    label = LABEL_NOISE.sub("", label or "").strip(" '\"")
     if label:
         named = [i for i in items if _norm(i["name"]) == _norm(label)]
         # "View" can be a ribbon tab and a checkbox; a tutorial means the tab (vision mixed them up in testing).
@@ -105,13 +127,32 @@ def snap(x, y, label, items, reach=160):
             best = min(named, key=dist)
             if dist(best) <= reach:
                 return best["rect"], best["name"]
-    pad = 10
-    under = [i for i in items if i["rect"][0] - pad <= x <= i["rect"][2] + pad
-             and i["rect"][1] - pad <= y <= i["rect"][3] + pad]
-    if under:
-        best = min(under, key=lambda i: (i["rect"][2] - i["rect"][0]) * (i["rect"][3] - i["rect"][1]))
-        return best["rect"], best["name"]
+    hit = _clickable_at(int(x), int(y), typing=action == "type")
+    if hit:
+        return hit
     return (x - 20, y - 20, x + 20, y + 20), label
+
+
+TYPABLE = CLICKABLE | {"DocumentControl", "GroupControl"}   # chat boxes are often Document/Group in browsers
+
+
+def _clickable_at(x, y, typing=False):
+    """The control Windows reports under the point, climbing to the nearest clickable or typable parent.
+    Works inside browsers, where scanning the whole tree is too slow."""
+    try:
+        kinds, max_w, max_h = (TYPABLE, 1400, 400) if typing else (CLICKABLE, 500, 160)
+        ctrl = auto.ControlFromPoint(x, y)
+        for _ in range(5):
+            if ctrl is None:
+                break
+            r = ctrl.BoundingRectangle
+            if (ctrl.ControlTypeName in kinds and 0 < r.width() <= max_w and 0 < r.height() <= max_h
+                    and r.left <= x <= r.right and r.top <= y <= r.bottom):
+                return (r.left, r.top, r.right, r.bottom), _clean(ctrl.Name or "")
+            ctrl = ctrl.GetParentControl()
+    except Exception:
+        pass
+    return None
 
 
 if __name__ == "__main__":

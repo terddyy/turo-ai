@@ -26,6 +26,10 @@ That guide is the source of truth for scope and order; this file adds verified A
   qwen3-vl returns `bbox_2d` (0-1000 grid) + label + say → `screen.snap` sharpens it to the UIA control
   (same-named TabItem first, then nearest same name, then smallest control under the point). Only if vision
   finds nothing: text plan/match over UIA names. Warm vision call ≈ 1 s.
+- **Skills (user, 07:20):** Turo is for ALL apps. `skills/*.md` = per-app know-how (first line `match:` words vs
+  window title / exe; `=x` = exact title). Up to 2 skills go into the vision prompt. Have: excel, word, powerpoint,
+  file-explorer, browser, ai-chat, windows-settings. Steps are click / type (example copied to clipboard,
+  advance on Enter) / explain (no box). Agent types text but never presses Enter/Send.
 - **Goal (user, 05:55):** a Clicky-like app (heyclicky.com) that runs locally, in any app. Write our own
   code — never clone or copy clicky / clicky-windows code.
 - **Offline by default.** Features 1–7 must work with Wi-Fi off. Cloud (F6) is only ever called after the
