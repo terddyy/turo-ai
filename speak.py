@@ -4,11 +4,13 @@ import re
 import threading
 from pathlib import Path
 
+import numpy as np
 import sounddevice as sd
 
 MODELS = Path(__file__).parent / "models"
 KOKORO_MODEL = MODELS / "kokoro-v1.0.onnx"   # fp32: ~1x real time on this CPU; int8 was 8x slower
 KOKORO_VOICES = MODELS / "voices-v1.0.bin"
+TAIL_S = 0.35   # silence after each sentence
 VOICES = {   # Kokoro voice id -> label shown in Settings
     "af_heart": "Heart (warm, US)", "af_bella": "Bella (bright, US)", "af_nicole": "Nicole (soft, US)",
     "am_michael": "Michael (calm, US)", "am_fenrir": "Fenrir (deep, US)",
@@ -68,6 +70,9 @@ def _worker():
                     if gen != _gen:
                         break
                     samples, rate = _kokoro.create(sentence, voice=voice, speed=1.05, lang="en-us")
+                    # Pad with silence: the sound device drops the last ~0.2 s of a clip, which clipped the
+                    # end of the last sentence. The pad also keeps is_busy() true through the room echo.
+                    samples = np.concatenate([samples, np.zeros(int(rate * TAIL_S), dtype=samples.dtype)])
                     _audio.put((gen, samples, rate))
             else:
                 engine = pyttsx3.init()   # fresh engine per line: a reused one often goes silent

@@ -71,8 +71,7 @@ def say_and_show(rect, text, spoken=None):
     state["last"] = (rect, text)
     bridge.show.emit(rect, text)
     if speak:
-        speak.stop()   # never talk over ourselves
-        speak.speak(spoken or text)
+        speak.speak(spoken or text)   # queued: a step never cuts off the one before it (Esc / stop / new question do)
 
 
 def compute_step(use_cloud=False):
@@ -186,6 +185,8 @@ def start_step(use_cloud=False):
 
 
 def new_question(text, context=""):
+    if speak:
+        speak.stop()   # a new question replaces whatever Turo was saying
     state["question"], state["context"], state["history"] = text, context, []
     home.add_history(text, state.get("app_title", ""))
     bridge.mode.emit("reset")

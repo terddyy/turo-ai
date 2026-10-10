@@ -36,7 +36,9 @@ def _on_audio(data, _frames, _time, _status):
     if _recording:
         _ptt.append(mono)
     elif _listening:
-        _blocks.put(mono)
+        # While Turo talks, send a None marker instead of audio: the phrase being recorded is thrown away,
+        # so Turo never answers its own voice (it did: "Click the Next button..." came back as a request).
+        _blocks.put(None if _busy() else mono)
 
 
 stream = sd.InputStream(samplerate=SR, channels=1, dtype="float32", blocksize=BLOCK, callback=_on_audio)
@@ -105,6 +107,9 @@ def _utterances():
     noise, buf, speaking, quiet = 0.005, [], False, 0
     while True:
         block = _blocks.get()
+        if block is None:   # Turo is speaking: drop anything half-recorded
+            buf, speaking, quiet = [], False, 0
+            continue
         rms = float(np.sqrt(np.mean(block * block)))
         loud = rms > max(0.012, noise * 3)
         if not speaking:
