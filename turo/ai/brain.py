@@ -134,11 +134,13 @@ that is open now), pick it directly. If it is hidden, pick the tab or menu that 
 Do not repeat a step listed in "Steps already shown"."""
 
 
-def locate(question, app_title, image_b64, history, use_cloud=False, skill="", context=""):
+def locate(question, app_title, image_b64, history, use_cloud=False, skill="", context="", memory=""):
     """Main path: the vision model reads the screenshot. Returns action, box center in 0-1000 (or None),
     label, text to type, say, done."""
     shown = "\n".join(f"- {h}" for h in history) or "none"
     text = f"Task: {question}\nApp in front: {app_title}\nSteps already shown:\n{shown}"
+    if memory:   # Turo's own memory: the click path that finished a similar task before
+        text += f"\nThis worked before for a similar task in this app: {memory}. Follow it if it fits the screen."
     if context:   # a follow-up: the user's earlier question, for context only
         text += f"\nEarlier question in this conversation: {context}"
     content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},

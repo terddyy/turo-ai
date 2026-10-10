@@ -2,17 +2,15 @@
 import json
 import os
 import time
-from pathlib import Path
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QStackedWidget,
                                QVBoxLayout, QWidget)
 
-from turo.config import ROOT
+from turo.config import DATA, ROOT
 from turo.ui.style import QSS, _card, _chip, _label, make_icon
 
-DATA = Path(os.environ.get("APPDATA", ".")) / "Turo"
 SETTINGS_FILE = DATA / "settings.json"
 HISTORY_FILE = DATA / "history.json"
 DEFAULTS = {"onboarded": False, "wake": True, "speak": True, "voice": "af_heart"}
@@ -184,7 +182,7 @@ class Home(QWidget):
         grid.setVerticalSpacing(10)
         grid.addWidget(_label("Ready check", "h2"), 0, 0, 1, 3)
         self.status_rows = {}
-        for r, key in enumerate(["Local AI", "Microphone", "Voice", "Listening"], start=1):
+        for r, key in enumerate(["Local AI", "Microphone", "Voice", "Listening", "Memory"], start=1):
             dot = QLabel("●")
             name = _label(key, wrap=False)
             detail = _label("checking…", "muted")

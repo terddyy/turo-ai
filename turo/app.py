@@ -22,7 +22,7 @@ import uiautomation as auto
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
-from turo.ai import brain, skills
+from turo.ai import brain, memory, skills
 from turo.sense import screen
 from turo.config import AGENT_KEY, ASK_KEY, BASE_URL, CLOUD_KEY, MAX_AGENT_STEPS, MODEL, NEXT_KEY, WAKE_WORD
 from turo.ui.overlay import Overlay
@@ -55,6 +55,7 @@ overlay = Overlay(level_fn=lambda: voice.level if voice else 0.0,
                   session_fn=lambda: bool(voice and voice.in_session()))
 bridge = Bridge()
 state = {"hwnd": None, "question": "", "context": "", "history": [], "gen": 0, "stop": False,
+         "app": "", "path": [], "recalled": None,
          "talking": False, "last": None}
 busy = threading.Lock()   # one model call at a time
 user32 = ctypes.windll.user32
@@ -81,7 +82,20 @@ def compute_step(use_cloud=False):
     Returns {action: click/type/explain, rect, say, text, done, label}.
     Vision first: the model reads a screenshot and decides. UI Automation only sharpens the box."""
     title, items = screen.list_controls(state["hwnd"])
-    skill = skills.for_app(title, screen.exe_of(state["hwnd"]))
+    exe = screen.exe_of(state["hwnd"])
+    skill = skills.for_app(title, exe)
+    state["app"] = exe.lower()
+    if state["recalled"] == "unset":   # first look at this question: anything similar done before here?
+        state["recalled"] = memory.recall(state["app"], state["question"])
+    known = state["recalled"] or []
+    for n in range(len(known) - 1, -1, -1) if not use_cloud else ():
+        if known[n] in state["path"]:   # this and everything before it is already done
+            break
+        hit = screen.find_named(known[n], items)
+        if hit:   # the furthest remembered step on screen: replay it, no screenshot or model call
+            print(f"[memory] step: {known[n]}")
+            return {"action": "click", "rect": hit["rect"], "say": f"Click {hit['name']}.", "text": "",
+                    "done": n == len(known) - 1, "label": hit["name"]}
     bridge.mode.emit("capture")   # Turo's ring, label and card must not be in its own screenshot
     bridge.card.emit("capture", "")
     time.sleep(0.15)
@@ -91,7 +105,7 @@ def compute_step(use_cloud=False):
         bridge.mode.emit("thinking")
         bridge.card.emit("restore", "")
     seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud, skill=skill,
-                        context=state["context"])
+                        context=state["context"], memory=" > ".join(known))
     step = {"action": seen["action"], "rect": None, "say": seen["say"], "text": seen["text"],
             "done": seen["done"], "label": seen["label"]}
     if seen["action"] == "explain":   # an answer, not a click: no box
@@ -124,9 +138,17 @@ def present(step, prefix=""):
         say_and_show(None, say)
     bridge.card.emit("step", full)
     state["history"].append(say)
+    if step["rect"] and step["label"]:
+        state["path"].append(screen.clean_label(step["label"]))
+
+
+def learn():
+    """The task finished: remember the click path for next time."""
+    memory.remember(state["app"], state["question"], state["path"])
 
 
 def finish(gen):
+    learn()
     say_and_show(None, "All done! 🎉 Anything else?")
     bridge.card.emit("finish", "")
     bridge.mode.emit("done")
@@ -190,6 +212,7 @@ def new_question(text, context=""):
     if speak:
         speak.stop()   # a new question replaces whatever Turo was saying
     state["question"], state["context"], state["history"] = text, context, []
+    state["path"], state["recalled"] = [], "unset"
     home.add_history(text, state.get("app_title", ""))
     bridge.mode.emit("reset")
     bridge.card.emit("start", text)
@@ -360,6 +383,7 @@ def run_agent():
                     say_and_show(rect, "I typed it in. Read it, then press Enter or Send when you're ready.")
                     break
                 if step["done"]:
+                    learn()
                     say_and_show(None, "All done! 🎉")
                     bridge.mode.emit("done")
                     bridge.card.emit("finish", "")
@@ -420,6 +444,7 @@ def get_status():
         "Voice": (bool(speak) and settings.get("speak"),
                   (speak.engine_name if speak else "off") + ("" if settings.get("speak") else " (muted)")),
         "Listening": (listening, "say “Hey Turo”" if listening else "paused: press F9 to type"),
+        "Memory": (True, f"{memory.count()} tasks learned on this laptop"),
     }
 
 

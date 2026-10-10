@@ -133,6 +133,18 @@ def snap(x, y, label, items, reach=160, action="click"):
     return (x - 20, y - 20, x + 20, y + 20), label
 
 
+def clean_label(label):
+    """ "View tab" -> "View": the name as it appears on screen (used for snapping and for memory)."""
+    return LABEL_NOISE.sub("", (label or "").strip(" '\"")).strip()
+
+
+def find_named(label, items):
+    """The visible control with exactly this name (a ribbon tab first), or None."""
+    named = [i for i in items if _norm(i["name"]) == _norm(clean_label(label)) and "(selected)" not in i["type"]]
+    tabs = [i for i in named if i["type"] == "TabItem"]
+    return (tabs or named or [None])[0]
+
+
 TYPABLE = CLICKABLE | {"DocumentControl", "GroupControl"}   # chat boxes are often Document/Group in browsers
 
 
