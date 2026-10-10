@@ -8,6 +8,7 @@ import onnx_asr
 import sounddevice as sd
 
 from turo.config import PARAKEET_DIR
+from turo.voice import vocab
 
 SR = 16000
 BLOCK = 1600   # 100 ms
@@ -48,7 +49,7 @@ stream.start()
 def transcribe(audio):
     if len(audio) < SR * 0.3 or float(np.sqrt(np.mean(audio * audio))) < MIN_RMS:
         return ""
-    return str(model.recognize(audio, sample_rate=SR)).strip()
+    return vocab.fix(str(model.recognize(audio, sample_rate=SR)).strip())
 
 
 # --- push-to-talk ------------------------------------------------------------------
