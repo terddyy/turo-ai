@@ -10,18 +10,20 @@ TOUR = [
      "Your friendly on-screen tutor. Ask how to do something in any app, and Turo points at the exact spot "
      "and walks you through it, step by step. Everything runs on this laptop, even with Wi-Fi off.",
      []),
-    ("🗣️", "Just say “Hey Turo”",
-     "Then ask the way you'd ask a friend: “Hey Turo, how do I freeze the top row?”. "
-     "Prefer the keyboard? Press F9 and type, or hold Win + Alt and talk.",
-     ["Hey Turo", "F9 type", "Win + Alt talk"]),
+    ("🗣️", "Tap and talk",
+     "Tap Win + Alt (or click the blue mic in the corner) and ask the way you'd ask a friend: "
+     "“How do I freeze the top row?”. Turo stops listening when you stop talking. "
+     "You can also hold Win + Alt while you talk, or press F9 and type.",
+     ["Win + Alt talk", "Mic button", "F9 type"]),
     ("🟩", "Follow the buddy",
      "Turo flies to the right button and lights it up. Click it, and Turo moves on to the next step by itself. "
      "When a step needs typing, Turo copies an example for you: just press Ctrl+V.",
      ["Click where it points", "Ctrl+V"]),
     ("💬", "Keep talking",
-     "Once you've said “Hey Turo”, it stays with you for the whole task. Say “next”, “repeat”, "
-     "ask a follow-up, or say “do it” and Turo clicks for you. It never presses Send or Delete for you.",
-     ["next", "repeat", "do it", "stop / Esc"]),
+     "Talk again any time during a task: “next”, “I already did that”, “repeat”, or a follow-up. "
+     "When a step is safe, Turo asks “Want me to do it?”. Say “yes” or click Yes, or ask “… for me” "
+     "and it just does it. It never presses Send or Delete for you.",
+     ["next", "repeat", "yes / do it", "stop / Esc"]),
     ("🧩", "Works in any app",
      "Turo reads your screen, so it works everywhere. It has extra know-how (skills) for Excel, Word, "
      "PowerPoint, File Explorer, your browser, Settings and AI apps like ChatGPT and Claude.",

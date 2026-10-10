@@ -14,9 +14,6 @@ That guide is the source of truth for scope and order; this file adds verified A
   no type-hint campaigns. Each module gets a `if __name__ == "__main__":` smoke test (as in the guide).
 - **Build order is fixed** (features 1→8, see Layout below).
   Each step must leave a runnable product. Skip a feature that overruns its slot; never break an earlier one.
-- **Feature freeze at 8:45** (moved from 8:20 by the user; do not push it later). After that: only the
-  worst-bug fix, README, video. 8:45 rehearse (Wi-Fi off) → 9:00 video + README + key check + repo public
-  → 9:30 post on X/LinkedIn → 9:40 submit (check every field) → 10 min slack.
 - **Skip order if late:** hybrid → agent → spoken reply → voice. Features 1–4 are the product.
 - Only add the packages in `requirements.txt`. Ask before any other dependency.
 
@@ -49,7 +46,7 @@ That guide is the source of truth for scope and order; this file adds verified A
 | --- | --- |
 | F9 | Ask by typing |
 | F10 | Next step (re-read screen) |
-| Hold Win+Alt | Ask by voice |
+| Tap or hold Win+Alt, or click the mic button | Talk (tap = hands-free, ends after 0.9 s quiet) |
 | F7 / Esc | Agent mode / stop |
 | F6 | One-time cloud ask (after warning) |
 
@@ -66,12 +63,18 @@ That guide is the source of truth for scope and order; this file adds verified A
 
 ```
 main.py               launcher (desktop shortcut runs `pythonw main.py`; same as `python -m turo`)
-turo/app.py           wiring: tutor loop (steps, auto-advance, agent), voice/hotkeys, Home, tray, task card
+turo/app.py           wiring only: Qt app, overlay, Home, tray, task card, settings, ready-check status
+turo/session.py       shared state dict, `bridge` (Qt signals), busy lock, optional speak/voice modules
+turo/tutor.py         tutor loop: compute_step, present, auto-advance watch, agent mode, stop, cloud ask
+turo/commands.py      spoken commands ("next", "stop", "do it") and Hey Turo handling
+turo/hotkeys.py       F-keys, Esc, hold Win+Alt push-to-talk; register()
 turo/config.py        model, hotkeys, paths (ROOT = repo root)
 turo/ai/              brain.py (vision + text prompts), skills.py (loads skills/*.md)
 turo/sense/screen.py  UI Automation controls, screenshot, snap point -> exact control
 turo/voice/           listen.py (Parakeet STT, "Hey Turo", sessions), speak.py (Kokoro TTS)
-turo/ui/              overlay.py (buddy cursor), home.py, card.py (task card), tray.py, style.py
+turo/ui/              overlay.py (buddy cursor), home.py (sidebar + page stack), card.py (task card), tray.py,
+                      style.py (colour tokens C, QSS, glyph icons, make_* builders), store.py (settings/history)
+turo/ui/pages/        ask.py, tour.py, apps.py, history.py, settings.py: one QWidget per Home page
 skills/  models/      per-app know-how; Kokoro model files (git-ignored)
 ```
 
@@ -107,7 +110,8 @@ cd $HOME\Desktop	uro
 **Speech-to-text (07:00): Parakeet TDT 0.6B v3 int8 via `onnx-asr`, English only** — replaced faster-whisper.
   Model files reused from `%APPDATA%\com.pais.handy\models\parakeet-tdt-0.6b-v3-int8` (`TURO_PARAKEET_DIR`
   overrides). ~0.3 s/phrase on CPU. Invents "Thank you." from silence → keep the `MIN_RMS` gate.
-  Wake word "Hey Turo" is matched on Parakeet text (it heard "Hey Turrow"). UI text is English.
+  Wake word "Hey Turo" is OFF (user, Oct 10: `WAKE_WORD = False`); talk only via Win+Alt / mic button.
+  "Want me to do it?" is offered once per task on a verified, non-RISKY step. UI text is English.
 
 **faster-whisper (no longer used)**
 - `transcribe(np.float32 16 kHz array, language="tl")` returns `(segments_generator, info)`;

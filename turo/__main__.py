@@ -1,3 +1,5 @@
-from turo.app import run
+from turo import instance
 
-run()
+if instance.claim():   # already running: that copy shows its window instead
+    from turo.app import run
+    run()

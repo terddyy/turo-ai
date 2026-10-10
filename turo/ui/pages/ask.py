@@ -8,9 +8,9 @@ from turo.ui.pages import page_layout, repolish
 from turo.ui.style import make_card, make_chip, make_keys, make_label
 
 STATUS_KEYS = ("Local AI", "Microphone", "Voice", "Listening", "Memory")
-QUICK_KEYS = [(("F9",), "Type a question"), (("Win", "Alt"), "Hold to talk"),
+QUICK_KEYS = [(("F9",), "Type a question"), (("Win", "Alt"), "Tap or hold to talk"),
               (("F10",), "Next step"), (("F7",), "Do it for me"),
-              (("Esc",), "Stop"), (None, "Ask out loud")]
+              (("Esc",), "Stop"), (None, "Click to talk")]
 
 
 def greeting() -> str:
@@ -51,9 +51,9 @@ class AskPage(QWidget):
         col.addLayout(row)
         hint = QHBoxLayout()
         hint.setSpacing(8)
-        hint.addWidget(make_label("Or say", "faint", wrap=False))
-        hint.addWidget(make_chip("“Hey Turo”"))
-        hint.addWidget(make_label("from any app, or press", "faint", wrap=False))
+        hint.addWidget(make_label("Or tap", "faint", wrap=False))
+        hint.addLayout(make_keys("Win", "Alt"))
+        hint.addWidget(make_label("and talk from any app, or press", "faint", wrap=False))
         hint.addLayout(make_keys("F9"))
         hint.addStretch()
         col.addLayout(hint)
@@ -100,7 +100,7 @@ class AskPage(QWidget):
             if keys:
                 cell.addLayout(make_keys(*keys))
             else:
-                cell.addWidget(make_chip("“Hey Turo”"))
+                cell.addWidget(make_chip("🎤 Mic button"))
             cell.addWidget(make_label(what, "muted", wrap=False))
             cell.addStretch()
             grid.addLayout(cell, n // 2, n % 2)

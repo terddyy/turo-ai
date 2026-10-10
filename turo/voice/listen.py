@@ -25,6 +25,11 @@ model = onnx_asr.load_model("nemo-parakeet-tdt-0.6b-v3", PARAKEET_DIR, quantizat
 level = 0.0            # live mic loudness, for the overlay's waveform
 _ptt = []              # push-to-talk frames
 _recording = False
+_on_quiet = None       # hands-free recording: called once when the speaker stops talking
+_heard, _quiet, _noise = False, 0, 1.0
+END_QUIET = 9          # 0.9 s of quiet after speech ends a hands-free recording
+NO_SPEECH = 80         # 8 s without speech ends it too
+MAX_BLOCKS = 200       # 20 s cap
 _listening = False
 _blocks = queue.Queue()
 _busy = lambda: False  # set by listen(): True while Turo is speaking (don't hear ourselves)
@@ -36,6 +41,8 @@ def _on_audio(data, _frames, _time, _status):
     level = float(np.sqrt(np.mean(mono * mono)))
     if _recording:
         _ptt.append(mono)
+        if _on_quiet:
+            _end_when_quiet()
     elif _listening:
         # While Turo talks, send a None marker instead of audio: the phrase being recorded is thrown away,
         # so Turo never answers its own voice (it did: "Click the Next button..." came back as a request).
@@ -52,16 +59,42 @@ def transcribe(audio):
     return vocab.fix(str(model.recognize(audio, sample_rate=SR)).strip())
 
 
+def _end_when_quiet():
+    global _heard, _quiet, _noise, _on_quiet
+    _noise = min(_noise, level)   # quietest 100 ms so far = the room (a fan, a hum)
+    loud = level > max(0.012, _noise * 3)
+    _heard = _heard or loud
+    _quiet = 0 if loud else _quiet + 1
+    if (_heard and _quiet >= END_QUIET) or (not _heard and len(_ptt) >= NO_SPEECH) or len(_ptt) >= MAX_BLOCKS:
+        done, _on_quiet = _on_quiet, None
+        threading.Thread(target=done, daemon=True).start()
+
+
 # --- push-to-talk ------------------------------------------------------------------
-def start():
-    global _recording
+def start(on_quiet=None):
+    """Record until stop_and_transcribe(). on_quiet: hands-free mode, called once the user stops talking."""
+    global _recording, _on_quiet, _heard, _quiet, _noise
     _ptt.clear()
+    _heard, _quiet, _noise = False, 0, 1.0
+    _on_quiet = on_quiet
     _recording = True
 
 
+def cancel():
+    """Throw away a recording (Esc)."""
+    global _recording, _on_quiet
+    _recording, _on_quiet = False, None
+
+
+def hands_free(on_quiet):
+    """Switch a recording that is already running to hands-free (a tap instead of a hold)."""
+    global _on_quiet
+    _on_quiet = on_quiet
+
+
 def stop_and_transcribe():
-    global _recording
-    _recording = False
+    global _recording, _on_quiet
+    _recording, _on_quiet = False, None
     if not _ptt:
         return ""
     return transcribe(np.concatenate(_ptt))

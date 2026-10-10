@@ -46,6 +46,10 @@ class GuideCard(QWidget):
         self.steps_box = QVBoxLayout()
         self.steps_box.setSpacing(6)
         lay.addLayout(self.steps_box)
+        self.offer = make_label("")   # "Want me to do it for you?"
+        self.offer.setStyleSheet("color:#fcd34d; font-weight:600;")
+        self.offer.hide()
+        lay.addWidget(self.offer)
         row = QHBoxLayout()
         for text, sig, primary in [("Next", self.next_clicked, True), ("Do it", self.do_clicked, False),
                                    ("Stop", self.stop_clicked, False)]:
@@ -54,19 +58,30 @@ class GuideCard(QWidget):
                 b.setObjectName("primary")
             b.clicked.connect(sig.emit)
             row.addWidget(b)
+            if sig is self.do_clicked:
+                self.do_button = b
         row.addStretch()
         lay.addLayout(row)
         self.steps = []   # (text, done)
 
     def start(self, question):
         self.title.setText(question)
+        self.set_offer("")
         self.steps = []
         self._render("Looking at your screen…")
         self._place()
         self.show()
 
     def thinking(self):
+        self.set_offer("")
         self._render("Looking at your screen…")
+
+    def set_offer(self, text):
+        """Ask whether Turo should do the task; "" hides the question."""
+        self.offer.setText(text)
+        self.offer.setVisible(bool(text))
+        self.do_button.setText("Yes, do it" if text else "Do it")
+        self._place()
 
     def add_step(self, text):
         self.steps = [(t, True) for t, _ in self.steps] + [(text, False)]
@@ -75,6 +90,7 @@ class GuideCard(QWidget):
 
     def finish(self):
         self.steps = [(t, True) for t, _ in self.steps]
+        self.set_offer("")
         self._render("All done 🎉")
 
     def _render(self, status):
@@ -94,4 +110,4 @@ class GuideCard(QWidget):
         # on every step), then sit in the bottom-right corner above the taskbar.
         h = self.layout().totalHeightForWidth(self.width())
         g = QApplication.primaryScreen().availableGeometry()
-        self.setGeometry(g.right() - self.width() - 16, g.bottom() - h - 16, self.width(), h)
+        self.setGeometry(g.right() - self.width() - 16, g.bottom() - h - 80, self.width(), h)   # above the mic

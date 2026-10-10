@@ -22,21 +22,18 @@ def compute_step(use_cloud=False):
     """One look at the screen. Caller holds the UIA initializer.
     Returns {action: click/type/explain, rect, say, text, done, label}.
     Vision first: the model reads a screenshot and decides. UI Automation only sharpens the box."""
-    title, items = screen.list_controls(state["hwnd"])
+    pre = state.pop("prefetch", None)
+    if pre and pre[0] == state["hwnd"] and time.time() - pre[1] < 30:
+        title, items = pre[2]   # read while the user was talking
+    else:
+        title, items = screen.list_controls(state["hwnd"])
     exe = screen.exe_of(state["hwnd"])
     skill = skills.for_app(title, exe)
     state["app"] = exe.lower()
     if state["recalled"] == "unset":   # first look at this question: anything similar done before here?
         state["recalled"] = memory.recall(state["app"], state["question"])
     known = state["recalled"] or []
-    for n in range(len(known) - 1, -1, -1) if not use_cloud else ():
-        if known[n] in state["path"]:   # this and everything before it is already done
-            break
-        hit = screen.find_named(known[n], items)
-        if hit:   # the furthest remembered step on screen: replay it, no screenshot or model call
-            print(f"[memory] step: {known[n]}")
-            return {"action": "click", "rect": hit["rect"], "say": f"Click {hit['name']}.", "text": "",
-                    "done": n == len(known) - 1, "label": hit["name"]}
+    # Remembered labels are a hint, not proof that the current screen is at the same task step.
     bridge.mode.emit("capture")   # Turo's ring, label and card must not be in its own screenshot
     bridge.card.emit("capture", "")
     time.sleep(0.15)
@@ -45,23 +42,42 @@ def compute_step(use_cloud=False):
     finally:
         bridge.mode.emit("thinking")
         bridge.card.emit("restore", "")
-    seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud, skill=skill,
-                        context=state["context"], memory=" > ".join(known))
+    look = dict(use_cloud=use_cloud, skill=skill, context=state["context"], memory=" > ".join(known),
+                items=items, viewport=(ml, mt, mw, mh))
+    seen = brain.locate(state["question"], title, image, state["history"], **look)
+    last = state.get("last_label", "")
+    if last and not use_cloud and seen["action"] != "explain" and screen.label_score(seen["label"], last) >= 0.8:
+        # Same control as the step the user just did: the 4b model loops here. Ask once more, excluding it.
+        seen = brain.locate(state["question"], title, image, state["history"], avoid=last, **look)
     step = {"action": seen["action"], "rect": None, "say": seen["say"], "text": seen["text"],
-            "done": seen["done"], "label": seen["label"]}
+            "done": seen["done"], "label": seen["label"], "verified": False}
     if seen["action"] == "explain":   # an answer, not a click: no box
         step["done"] = True
         return step
-    if seen["point"]:
-        x, y = ml + seen["point"][0] * mw / 1000, mt + seen["point"][1] * mh / 1000
-        step["rect"], name = screen.snap(x, y, seen["label"], items, action=seen["action"])
+    if seen["point"] or seen.get("control_id") is not None:
+        point = seen["point"] or (500, 500)
+        x, y = ml + point[0] * mw / 1000, mt + point[1] * mh / 1000
+        box = seen.get("box")
+        rect = (ml + box[0]*mw/1000, mt + box[1]*mh/1000,
+                ml + box[2]*mw/1000, mt + box[3]*mh/1000) if box else None
+        step["rect"], name, step["verified"] = screen.resolve_target(
+            x, y, seen["label"], items, action=seen["action"], box=rect, control_id=seen.get("control_id"))
         step["label"] = name or seen["label"]
+        if not step["verified"]:
+            step["done"] = False
+            if not step["rect"]:
+                step["say"] = "I couldn't verify that control on this screen. Open the relevant menu and press Next."
+            else:
+                step["say"] = "Check this suggested area; I couldn't verify the exact control. " + step["say"]
         return step
     # The model saw nothing to click: fall back to reasoning over the control names.
     reply = brain.next_step(state["question"], title, items, state["history"], use_cloud=use_cloud, skill=skill)
     hit = next((i for i in items if i["id"] == reply["id"]), None)
     if hit:
-        step.update(action="click", rect=hit["rect"], say=reply["say"], done=reply["done"], label=hit["name"])
+        step.update(action="click", rect=hit["rect"], say=reply["say"], done=reply["done"], label=hit["name"],
+                    verified=True)
+    else:
+        step.update(done=False, say="I couldn't verify that control. Open the relevant menu and press Next.")
     return step
 
 
@@ -74,12 +90,15 @@ def present(step, prefix=""):
         full = f'{say}  Try: "{step["text"]}" (copied: press Ctrl+V)'
     if step["rect"]:   # on screen only a short label; the card holds the full instruction
         short = "Type here, then Ctrl+V" if step["action"] == "type" else f'Click {step["label"] or "here"}'
+        if not step.get("verified", False):
+            short = f'Check {step["label"] or "this area"}'
         say_and_show(step["rect"], short[:48], spoken=say)
     else:
         say_and_show(None, say)
     bridge.card.emit("step", full)
     state["history"].append(say)
-    if step["rect"] and step["label"]:
+    state["last_label"] = step["label"] if step["rect"] else ""
+    if step["rect"] and step["label"] and step.get("verified", False):
         state["path"].append(screen.clean_label(step["label"]))
 
 
@@ -90,6 +109,7 @@ def learn():
 
 def finish(gen):
     learn()
+    state["active"] = False
     say_and_show(None, "All done! 🎉 Anything else?")
     bridge.card.emit("finish", "")
     bridge.mode.emit("done")
@@ -127,6 +147,7 @@ def run_step(use_cloud):
             step = compute_step(use_cloud)
         present(step, "[CLOUD] " if use_cloud else "")
         open_follow_up()
+        offer(step)
         if step["action"] == "explain":
             bridge.mode.emit("reset")
         elif step["rect"]:
@@ -142,21 +163,65 @@ def run_step(use_cloud):
 def start_step(use_cloud=False):
     if not state["question"] or not busy.acquire(blocking=False):
         return
+    brain.keep_warm()   # also covers the wait for the user's click before the next step
     state["gen"] += 1   # cancels the previous click watcher
+    state["offered"] = False   # the user moved on: the "Want me to do it?" question is stale
     bridge.show.emit(None, "Looking…")
     bridge.mode.emit("thinking")
     bridge.card.emit("thinking", "")
     threading.Thread(target=run_step, args=(use_cloud,), daemon=True).start()
 
 
-def new_question(text, context=""):
+def new_question(text, context="", mode="teach"):
+    """mode: 'teach' (a how/where question: show the steps), 'offer' (a command: show the step and ask
+    "Want me to do it?"), 'do' (asked "... for me": run agent mode right away)."""
     if speak:
         speak.stop()   # a new question replaces whatever Turo was saying
     state["question"], state["context"], state["history"] = text, context, []
-    state["path"], state["recalled"] = [], "unset"
+    state["path"], state["recalled"], state["last_label"] = [], "unset", ""
+    state["active"], state["asked"], state["offered"], state["mode"] = True, False, False, mode
     store.add_history(text, state.get("app_title", ""))
     bridge.mode.emit("reset")
     bridge.card.emit("start", text)
+    if mode == "do":
+        start_agent()
+    else:
+        start_step()
+
+
+def offer(step):
+    """Once per task, for a command (not a how-to question) or a user who is stuck, when the step is a verified,
+    harmless click: ask "Want me to do it?" (card + voice). Answer: Yes button, F7, or saying "yes"."""
+    if (state.get("mode") != "offer" or state["asked"] or not step["rect"] or not step.get("verified") or step["action"] == "explain"
+            or any(word in step["label"].lower() for word in RISKY)):
+        return
+    state["asked"] = state["offered"] = True
+    bridge.card.emit("offer", "Want me to do it for you?")
+    if speak:
+        speak.speak("Want me to do it for you?")
+
+
+def prefetch():
+    """Read the app's controls while the user is still talking: the first step skips that 0.4 s."""
+    hwnd = state["hwnd"]
+
+    def work():
+        try:
+            with auto.UIAutomationInitializerInThread():
+                state["prefetch"] = (hwnd, time.time(), screen.list_controls(hwnd))
+        except Exception as err:   # window closed mid-scan: compute_step reads it again
+            print("[prefetch]", err)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def add_remark(text):
+    """A follow-up that isn't a new task ("I already did that", "it's not there"): same task, look again."""
+    if speak:
+        speak.stop()
+    state["history"].append(f'User replied: "{text}"')
+    if state.get("mode") == "teach":   # "I can't find it", "I already did that": stuck, so offer help
+        state["mode"], state["asked"] = "offer", False
     start_step()
 
 
@@ -189,7 +254,9 @@ def on_home_ask(text):
 
 # --- F7: agent mode, Esc: stop -----------------------------------------------------
 def run_agent():
-    state["stop"], state["history"] = False, []
+    state["stop"], state["history"], state["last_label"] = False, [], ""   # nothing clicked yet
+    state["offered"] = False
+    bridge.card.emit("offer", "")
     bridge.mode.emit("reset")
     try:
         with auto.UIAutomationInitializerInThread():
@@ -201,11 +268,17 @@ def run_agent():
                 rect = step["rect"]
                 if step["action"] == "explain" or not rect:
                     break
+                if not step.get("verified", False):
+                    say_and_show(rect, "I can't verify the exact control. Please check it yourself.")
+                    break
                 if any(word in step["label"].lower() for word in RISKY):
                     say_and_show(rect, "You click this one yourself. " + step["say"])
                     break
                 time.sleep(1.8)   # let the pointer fly and land before clicking
                 if state["stop"]:
+                    break
+                if not screen.verify_target(rect, step["label"], step["action"]):
+                    say_and_show(None, "That control changed or couldn't be verified. Press Next to look again.")
                     break
                 left, top, right, bottom = rect
                 auto.Click(int((left + right) / 2), int((top + bottom) / 2))
@@ -217,6 +290,7 @@ def run_agent():
                     break
                 if step["done"]:
                     learn()
+                    state["active"] = False
                     say_and_show(None, "All done! 🎉")
                     bridge.mode.emit("done")
                     bridge.card.emit("finish", "")
@@ -237,6 +311,11 @@ def start_agent():
 def stop_all():
     state["stop"] = True
     state["gen"] += 1
+    state["active"] = state["offered"] = False
+    if voice and state["talking"]:   # Esc while listening: throw the recording away
+        state["talking"] = False
+        voice.cancel()
+        bridge.talk.emit(False)
     if speak:
         speak.stop()
     if voice:

@@ -1,12 +1,11 @@
-"""Settings page: listening, spoken replies, the cursor buddy, and the voice."""
+"""Settings page: spoken replies, the cursor buddy, and the voice."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QComboBox, QFrame, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from turo.ui.pages import page_layout
 from turo.ui.style import glyph_icon, make_card, make_label
 
-TOGGLES = [("wake", "Listen for “Hey Turo”", "Audio is processed on this laptop and never saved."),
-           ("speak", "Read each step out loud", "Turo speaks every instruction as it shows it."),
+TOGGLES = [("speak", "Read each step out loud", "Turo speaks every instruction as it shows it."),
            ("buddy", "Show the cursor buddy when idle", "The little blue pointer that follows your mouse.")]
 
 

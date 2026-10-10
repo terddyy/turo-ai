@@ -16,7 +16,7 @@ AGENT_KEY = "f7"
 CLOUD_KEY = "f6"
 
 MAX_AGENT_STEPS = 6
-WAKE_WORD = True   # always listen for "Hey Turo" (audio stays on this laptop)
+WAKE_WORD = False   # "Hey Turo" off: the mic records only while the user taps/holds Win+Alt or the mic button
 
 # Speech-to-text model folder (Parakeet TDT 0.6B v3 int8, onnx-asr layout).
 PARAKEET_DIR = os.environ.get("TURO_PARAKEET_DIR",

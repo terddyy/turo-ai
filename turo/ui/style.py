@@ -19,7 +19,7 @@ CHECK_SVG = (ROOT / "assets" / "check.svg").as_posix()
 
 # Icon glyphs (Segoe Fluent Icons on Windows 11, Segoe MDL2 Assets on Windows 10: same code points).
 GLYPH = {"home": 0xE80F, "tour": 0xEA80, "apps": 0xE71D, "history": 0xE81C, "settings": 0xE713,
-         "folder": 0xE838, "play": 0xE768, "back": 0xE72B, "next": 0xE72A, "lock": 0xE72E}
+         "folder": 0xE838, "play": 0xE768, "back": 0xE72B, "next": 0xE72A, "lock": 0xE72E, "mic": 0xE720}
 
 QSS = """
 QWidget {{ color: {text}; font-family: {tf}; font-size: 13px; }}

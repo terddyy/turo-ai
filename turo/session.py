@@ -26,13 +26,15 @@ class Bridge(QObject):
     show = Signal(object, str)    # worker thread -> Qt thread
     mode = Signal(str)            # listening / thinking / done / reset
     copy = Signal(str)            # example prompt -> clipboard (Qt thread only)
-    card = Signal(str, str)       # task card: start / step / thinking / finish / hide / capture / restore
+    card = Signal(str, str)       # task card: start / step / thinking / finish / hide / capture / restore / offer
+    talk = Signal(bool)           # mic button: recording on / off
+    home = Signal()               # a second launch asked to show the window
     clear = Signal()
 
 
 bridge = Bridge()
 state = {"hwnd": None, "question": "", "context": "", "history": [], "gen": 0, "stop": False,
-         "app": "", "path": [], "recalled": None,
+         "app": "", "path": [], "recalled": None, "last_label": "", "active": False, "offered": False,
          "talking": False, "last": None}
 busy = threading.Lock()   # one model call at a time
 user32 = ctypes.windll.user32

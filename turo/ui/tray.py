@@ -6,12 +6,12 @@ from turo.ui.style import make_icon
 
 
 class Tray(QSystemTrayIcon):
-    def __init__(self, home, on_ask, on_toggle_listen, on_quit):
+    def __init__(self, home, on_ask, on_quit):
         super().__init__(make_icon(), home)
-        self.setToolTip("Turo: say “Hey Turo”")
+        self.setToolTip("Turo: tap Win+Alt or click the mic to talk")
         menu = QMenu()
         for text, fn in [("Open Turo", home.show_front), ("Ask (type)…", on_ask),
-                         ("Pause / resume listening", on_toggle_listen), ("Tour", home.show_tour)]:
+                         ("Tour", home.show_tour)]:
             act = QAction(text, menu)
             act.triggered.connect(fn)
             menu.addAction(act)

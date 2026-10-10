@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 
 from openai import OpenAI
@@ -7,6 +8,31 @@ from turo.config import BASE_URL, CLOUD_API_KEY, CLOUD_BASE_URL, CLOUD_MODEL, MO
 
 client = OpenAI(base_url=BASE_URL, api_key="local")
 cloud = OpenAI(base_url=CLOUD_BASE_URL, api_key=CLOUD_API_KEY) if CLOUD_API_KEY else None
+
+# The laptop GPU powers down after ~5 s idle; waking it adds ~2.5 s to the next call (measured: 3.5 s vs 1.1 s).
+# While a session is active, a 1-token ping every 3 s keeps it awake. The ping reuses the last system prompt
+# so Ollama's cached prompt prefix survives.
+_warm_until = 0.0
+_last_system = "ok"
+
+
+def _warm_loop():
+    while time.time() < _warm_until:
+        try:
+            client.chat.completions.create(model=MODEL, max_tokens=1, messages=[
+                {"role": "system", "content": _last_system}, {"role": "user", "content": "ok"}])
+        except Exception:   # Ollama down: the ready-check reports it, nothing to do here
+            return
+        time.sleep(3)
+
+
+def keep_warm(seconds=60):
+    """Call when the user starts interacting (hotkey, wake word, each step)."""
+    global _warm_until
+    idle = time.time() >= _warm_until
+    _warm_until = max(_warm_until, time.time() + seconds)
+    if idle:
+        threading.Thread(target=_warm_loop, daemon=True).start()
 
 SYSTEM = """You are Turo, an on-screen tutor for Windows apps.
 The user asks how to do something in the app on their screen.
@@ -119,7 +145,7 @@ Then give the ONE next step. If an app SKILL is given below, use its layout and 
 but only pick what is actually visible in the screenshot.
 
 Reply with JSON only:
-{"action": "click" | "type" | "explain", "bbox_2d": [x1, y1, x2, y2], "label": string, "text": string,
+{"action": "click" | "type" | "explain", "control_id": number | null, "bbox_2d": [x1, y1, x2, y2], "label": string, "text": string,
  "say": string, "done": boolean}
 - action "click": bbox_2d is the box around the element to click; label is its visible text or icon name.
 - action "type": bbox_2d is the text box to type into; text is a good, specific example the user can type
@@ -127,43 +153,94 @@ Reply with JSON only:
 - action "explain": the question needs an answer, not a click (e.g. "how do I write a good prompt?");
   bbox_2d is []. say holds the answer in up to two short sentences.
 - bbox_2d uses a 0-1000 grid over the screenshot (0,0 = top-left, 1000,1000 = bottom-right).
+- Visible accessibility controls may be listed with IDs and their boxes on the same grid.
+  When the target appears in that list, return its control_id and copy its visible name into label exactly.
+  Otherwise use control_id null. Never invent an ID or choose a different control just because it is nearby.
+- For an icon-only menu opener, name the visible icon (e.g. "+"), not the hidden final menu item.
+  If the requested item is not visible, first open its menu. If a menu is already open, pick its visible row.
+- Ignore Turo's blue pointer, its instruction bubble, and task card; those are overlays, not app controls.
+- text: "" unless action is "type".
+- If the task is not something to do on this screen (small talk, a greeting, or too unclear to act on), use
+  action "explain" and in say ask briefly and kindly what they want to do.
+- Lines starting with 'User replied:' are what the user told you about the last step. Believe them.
 - say: one short, friendly sentence telling the user what to do and why. Use the user's language.
 - done: true only when the task is finished after this step.
 Only pick things visible in the screenshot. If the button you need is already visible (for example on the tab
 that is open now), pick it directly. If it is hidden, pick the tab or menu that opens it.
-Do not repeat a step listed in "Steps already shown"."""
+Previous instructions are history, not proof that the user completed them. Follow the current screen;
+if a menu did not open yet, it is OK to point to its opener again."""
 
 
-def locate(question, app_title, image_b64, history, use_cloud=False, skill="", context="", memory=""):
+def locate(question, app_title, image_b64, history, use_cloud=False, skill="", context="", memory="",
+           items=None, viewport=None, avoid=""):
     """Main path: the vision model reads the screenshot. Returns action, box center in 0-1000 (or None),
-    label, text to type, say, done."""
+    label, text to type, say, done. avoid: a control the user already clicked (breaks repeat loops)."""
+    global _last_system
     shown = "\n".join(f"- {h}" for h in history) or "none"
     text = f"Task: {question}\nApp in front: {app_title}\nSteps already shown:\n{shown}"
+    if avoid:
+        text += (f"\nThe user already clicked \"{avoid}\" and that step is done. Do NOT point to \"{avoid}\" again: "
+                 "give the next step toward the task on the current screen.")
+    sent_ids = set()
     if memory:   # Turo's own memory: the click path that finished a similar task before
         text += f"\nThis worked before for a similar task in this app: {memory}. Follow it if it fits the screen."
     if context:   # a follow-up: the user's earlier question, for context only
         text += f"\nEarlier question in this conversation: {context}"
+    if items and viewport:
+        ml, mt, mw, mh = viewport
+        visible = [i for i in items if i["rect"][0] < ml + mw and i["rect"][2] > ml and
+                   i["rect"][1] < mt + mh and i["rect"][3] > mt]
+        # Popup rows first; retain both the toolbar and composer when a long page fills the tree.
+        menus = [i for i in visible if i["type"] == "MenuItem"]
+        other = [i for i in visible if i not in menus]
+        remaining = max(0, 40 - len(menus))
+        front = (remaining + 1) // 2
+        candidates = (menus + other[:front] + (other[-(remaining - front):] if remaining > front else []))[:40]
+        candidates = list({i["id"]: i for i in candidates}.values())
+        sent_ids = {i["id"] for i in candidates}
+        controls = []
+        for i in candidates:
+            l, t, r, b = i["rect"]
+            box = [round(max(0, min(1000, v))) for v in
+                   ((l-ml)*1000/mw, (t-mt)*1000/mh, (r-ml)*1000/mw, (b-mt)*1000/mh)]
+            controls.append(f'{i["id"]} | {i["type"]} | {i["name"]} | {box}')
+        text += "\nVisible controls (ID | type | exact name | bbox_2d):\n" + "\n".join(controls)
     content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
                {"type": "text", "text": text}]
     t = time.time()
     system = VISION_SYSTEM + (f"\n\n{skill}" if skill else "")
+    if not use_cloud:
+        _last_system = system
     raw = _chat(system, content, use_cloud)
     start, end = raw.find("{"), raw.rfind("}")
-    point, data = None, {}
+    point, valid_box, data = None, None, {}
     try:
         data = json.loads(raw[start:end + 1]) if start != -1 and end > start else {}
         box = [float(v) for v in data.get("bbox_2d") or []]
-        if len(box) == 4 and all(0 <= v <= 1000 for v in box):
+        if (len(box) == 4 and all(0 <= v <= 1000 for v in box)
+                and box[0] < box[2] and box[1] < box[3]):
+            valid_box = tuple(box)
             point = ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
         elif len(box) == 2 and all(0 <= v <= 1000 for v in box):
             point = (box[0], box[1])
     except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
         data = data if isinstance(data, dict) else {}
+    say = str(data.get("say") or "").strip() or FALLBACK_SAY
+    control_id = data.get("control_id")
+    if isinstance(control_id, bool) or not isinstance(control_id, (int, str)):
+        control_id = None
+    else:
+        try:
+            control_id = int(control_id)
+        except ValueError:
+            control_id = None
+    if control_id not in sent_ids:
+        control_id = None
     action = str(data.get("action") or "").lower()
     if action not in ("click", "type", "explain"):
-        action = "click" if point else "explain"
-    say = str(data.get("say") or "").strip() or FALLBACK_SAY
+        action = "click" if point or control_id is not None else "explain"
     reply = {"action": action, "point": point, "label": str(data.get("label") or "").strip(),
+             "box": valid_box, "control_id": control_id,
              "text": str(data.get("text") or "").strip(), "say": say, "done": data.get("done") is True}
     print(f"[brain] vision {time.time() - t:.1f}s {reply}")
     return reply
