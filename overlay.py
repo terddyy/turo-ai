@@ -7,9 +7,9 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 PILL_MAX_W = 380   # message pills wrap past this width
 BLUE = QColor("#3b82f6")
-GREEN = QColor("#22c55e")
 INK = QColor(15, 23, 42, 235)
 FLIGHT_S = 0.6     # buddy flight time
+CLICK_EVERY_S = 1.4   # once landed, the buddy "clicks" the element on this beat, showing the user what to do
 
 
 def _screen_for(px, py):
@@ -27,8 +27,9 @@ def _ease(t):
 
 
 class Overlay(QWidget):
-    """Full-screen click-through layer, kept minimal: a buddy pointer, a thin ring on the target and a
-    one-line label. Full instructions live in the task card. Modes: idle, listening, thinking, message,
+    """Full-screen click-through layer, Clicky-style: a buddy cursor flies to the element, points at it with
+    its tip, carries a short label ("Click Freeze Panes") and acts out the click. No boxes or spotlight;
+    full instructions live in the task card. Modes: idle, listening, thinking, message,
     pointing, done, capture (draw nothing while Turo screenshots the screen)."""
 
     def __init__(self, level_fn=lambda: 0.0, session_fn=lambda: False):
@@ -67,7 +68,7 @@ class Overlay(QWidget):
                                         zip(rect, (g.x(), g.y(), g.x(), g.y())))
             self.target = QRectF(left, top, right - left, bottom - top)
             self.last_target = self.target
-            end = QPointF(self.target.left() - 4, self.target.center().y() + 6)
+            end = QPointF(self.target.center().x(), self.target.center().y())   # tip on the element
             start = self.buddy
             mid = (start + end) / 2
             control = QPointF(mid.x(), min(start.y(), end.y()) - 140)   # arc upward
@@ -117,9 +118,10 @@ class Overlay(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         now = time.time()
         landed = self.target is not None and (not self.flight or now - self.flight[3] >= FLIGHT_S)
+        press = 1.0
         if landed:
-            self._draw_target(p, now)
-        self._draw_buddy(p, now)
+            press = self._draw_click(p, now)
+        self._draw_buddy(p, now, press)
         if self.mode == "listening":
             self._draw_wave(p)
         elif self.mode == "thinking":
@@ -127,16 +129,20 @@ class Overlay(QWidget):
         if self.text and (landed or self.target is None):
             self._draw_pill(p, now)
 
-    def _draw_target(self, p, now):
-        pulse = (math.sin(now * 3) + 1) / 2
-        ring = QColor(GREEN)
-        ring.setAlpha(int(170 + 85 * pulse))
-        p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(ring, 2.5))
-        p.drawRoundedRect(self.target.adjusted(-5, -5, 5, 5), 7, 7)
+    def _draw_click(self, p, now):
+        """Act out a click at the buddy's tip: a quick press and a ripple, repeating. Returns the press scale."""
+        landed_at = self.flight[3] + FLIGHT_S if self.flight else self.mode_t
+        phase = (now - landed_at) % CLICK_EVERY_S
+        if phase < 0.45:
+            ripple = QColor(BLUE)
+            ripple.setAlpha(int(220 * (1 - phase / 0.45)))
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(ripple, 2.5))
+            p.drawEllipse(self.buddy, 5 + phase * 50, 5 + phase * 50)
+        return 0.82 if phase < 0.12 else 1.0
 
-    def _draw_buddy(self, p, now):
-        bob = math.sin(now * 3) * 1.5 if not self.flight else 0
+    def _draw_buddy(self, p, now, press=1.0):
+        bob = math.sin(now * 3) * 1.5 if not (self.flight or self.target) else 0
         b = self.buddy + QPointF(0, bob)
         if self.session_fn():   # "I'm with you": a soft breathing halo while the session is open
             breath = (math.sin(now * 2.5) + 1) / 2
@@ -145,7 +151,7 @@ class Overlay(QWidget):
             p.setPen(Qt.NoPen)
             p.setBrush(halo)
             p.drawEllipse(b + QPointF(9, 10), 20 + 5 * breath, 20 + 5 * breath)
-        scale = 1.0 + (0.15 * (math.sin(now * 8) + 1) / 2 if self.mode == "listening" else 0)
+        scale = press * (1.0 + (0.15 * (math.sin(now * 8) + 1) / 2 if self.mode == "listening" else 0))
         path = QPainterPath(QPointF(b.x(), b.y()))   # tip points up-left, like a cursor
         path.lineTo(b.x() + 7 * scale, b.y() + 22 * scale)
         path.lineTo(b.x() + 11 * scale, b.y() + 13 * scale)
@@ -179,20 +185,16 @@ class Overlay(QWidget):
             p.drawEllipse(c + QPointF(math.cos(a) * 22, math.sin(a) * 22), 4, 4)
 
     def _draw_pill(self, p, now):
-        """One short label: "2 · Click Freeze Panes" beside the target, or a small message by the buddy."""
+        """A short label riding on the buddy cursor: "Click Freeze Panes", or a small message."""
         pointing = self.target is not None
-        text = f"{self.step} · {self.text}" if pointing and self.step else self.text
+        text = self.text
         p.setFont(QFont("Segoe UI", 10, QFont.DemiBold if pointing else QFont.Normal))
         flags = int(Qt.TextWordWrap)
         box = p.boundingRect(QRectF(0, 0, PILL_MAX_W, 400), flags, text)
         w, h = box.width() + 30, box.height() + 14
-        if pointing:   # right of the target, else below it, kept on screen
-            t = self.target
-            x, y = t.right() + 14, t.center().y() - h / 2
-            if x + w > self.width() - 8:
-                x, y = t.left(), t.bottom() + 12
-        else:
-            x, y = self.buddy.x() + 30, self.buddy.y() + 26
+        x, y = self.buddy.x() + 22, self.buddy.y() + 24   # like a cursor tooltip, below-right of the tip
+        if x + w > self.width() - 8:   # near the right edge: hang it to the left of the cursor instead
+            x = self.buddy.x() - w - 6
         x = min(max(x, 8), self.width() - w - 8)
         y = min(max(y, 8), self.height() - h - 8)
         p.setOpacity(_ease(min((now - self.text_t) / 0.2, 1.0)))   # quick fade-in
@@ -200,7 +202,7 @@ class Overlay(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(INK)
         p.drawRoundedRect(pill, h / 2 if h < 40 else 12, h / 2 if h < 40 else 12)
-        p.setBrush(GREEN if self.mode in ("pointing", "done") else BLUE)
+        p.setBrush(BLUE)
         p.drawEllipse(QPointF(pill.left() + 12, pill.top() + min(h / 2, 17)), 3.5, 3.5)
         p.setPen(QColor("white"))
         p.drawText(QRectF(pill.left() + 22, pill.top() + 7, box.width() + 4, box.height()), flags, text)

@@ -516,12 +516,14 @@ class GuideCard(QWidget):
             lab = _label(f"{'✓' if done else '●'}  {i}. {text}")
             lab.setStyleSheet("color:#64748b;" if done else "color:#e5e7eb; font-size:14px;")
             self.steps_box.addWidget(lab)
-        self.adjustSize()
         self._place()
 
     def _place(self):
+        # Size from the wrapped text's real height (adjustSize() guessed too small and Qt logged a warning
+        # on every step), then sit in the bottom-right corner above the taskbar.
+        h = self.layout().totalHeightForWidth(self.width())
         g = QApplication.primaryScreen().availableGeometry()
-        self.move(g.right() - self.width() - 16, g.bottom() - self.sizeHint().height() - 16)
+        self.setGeometry(g.right() - self.width() - 16, g.bottom() - h - 16, self.width(), h)
 
 
 class Tray(QSystemTrayIcon):
