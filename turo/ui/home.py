@@ -13,7 +13,8 @@ from turo.ui.style import QSS, _card, _chip, _label, make_icon
 
 SETTINGS_FILE = DATA / "settings.json"
 HISTORY_FILE = DATA / "history.json"
-DEFAULTS = {"onboarded": False, "wake": True, "speak": True, "voice": "af_heart"}
+DEFAULTS = {"onboarded": False, "wake": True, "speak": True, "voice": "af_heart", "buddy": True,
+            "tray_hint_shown": False}
 
 TOUR = [
     ("👋", "Meet Turo",
@@ -69,6 +70,7 @@ def add_history(question, app):
 class Home(QWidget):
     ask = Signal(str)                 # the user typed a question
     setting_changed = Signal(str, object)
+    hidden_to_tray = Signal()          # the user closed the window; Turo keeps running
 
     def __init__(self, settings, skill_list, status_fn, voices):
         super().__init__()
@@ -149,6 +151,7 @@ class Home(QWidget):
     def closeEvent(self, event):   # closing hides to the tray; Quit is in the tray menu
         event.ignore()
         self.hide()
+        self.hidden_to_tray.emit()
 
     # --- pages -------------------------------------------------------------------
     def _page(self):
@@ -322,7 +325,8 @@ class Home(QWidget):
         cl.setContentsMargins(18, 16, 18, 16)
         cl.setSpacing(14)
         for key, text in [("wake", "Listen for “Hey Turo” (audio stays on this laptop)"),
-                          ("speak", "Read each step out loud")]:
+                          ("speak", "Read each step out loud"),
+                          ("buddy", "Show the Turo buddy next to my cursor when idle")]:
             box = QCheckBox(text)
             box.setChecked(bool(self.settings.get(key)))
             box.toggled.connect(lambda on, key=key: self._set(key, on))

@@ -458,6 +458,8 @@ def apply_setting(key, value):
     elif key == "voice" and speak:
         speak.voice = value
         speak.speak("Hi, this is my new voice.")
+    elif key == "buddy":
+        overlay.show_idle = bool(value)
     elif key == "wake" and voice:
         voice.set_listening(value)
     tray.setToolTip("Turo: say “Hey Turo”" if settings.get("wake") else "Turo: listening paused (F9 to type)")
@@ -477,6 +479,19 @@ skill_list = [(body.splitlines()[0].replace("SKILL:", "").split("(")[0].split(".
 win = home.Home(settings, skill_list, get_status, speak.VOICES if speak else {})
 win.ask.connect(on_home_ask)
 win.setting_changed.connect(apply_setting)
+overlay.show_idle = bool(settings.get("buddy", True))
+
+
+def on_hidden_to_tray():
+    """First time the window is closed, say where Turo went (the buddy stays, so it looked like a bug)."""
+    if not settings.get("tray_hint_shown"):
+        tray.showMessage("Turo is still running",
+                         "It keeps listening for “Hey Turo”. Right-click the tray icon to quit, "
+                         "or turn off the cursor buddy in Settings.", make_icon(), 6000)
+        apply_setting("tray_hint_shown", True)
+
+
+win.hidden_to_tray.connect(on_hidden_to_tray)
 tray = Tray(win, lambda: (track_app(), win.open_ask()), toggle_listening, quit_app)
 app.setWindowIcon(make_icon())
 if speak:

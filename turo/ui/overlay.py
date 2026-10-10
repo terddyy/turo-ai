@@ -41,6 +41,7 @@ class Overlay(QWidget):
         self.setGeometry(QApplication.primaryScreen().geometry())
         self.level_fn = level_fn
         self.session_fn = session_fn   # True while Turo is in a conversation (no wake word needed)
+        self.show_idle = True          # Settings: keep the buddy by the cursor even when Turo is idle
         self.mode = "idle"
         self.mode_t = time.time()
         self.target = None      # QRectF in widget coords
@@ -121,7 +122,8 @@ class Overlay(QWidget):
         press = 1.0
         if landed:
             press = self._draw_click(p, now)
-        self._draw_buddy(p, now, press)
+        if self.show_idle or self.mode != "idle" or self.target is not None or self.session_fn():
+            self._draw_buddy(p, now, press)
         if self.mode == "listening":
             self._draw_wave(p)
         elif self.mode == "thinking":
