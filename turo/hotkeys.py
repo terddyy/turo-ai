@@ -133,7 +133,6 @@ def register(wake_on):
     """Hook every key and start the "Hey Turo" listener. wake_on: the saved Listening setting."""
     keyboard.add_hotkey(ASK_KEY, on_ask_key, suppress=True)
     keyboard.add_hotkey(NEXT_KEY, tutor.start_step, suppress=True)
-    keyboard.add_hotkey(AGENT_KEY, tutor.start_agent, suppress=True)
     keyboard.add_hotkey(CLOUD_KEY, tutor.ask_cloud, suppress=True)
     keyboard.add_hotkey("esc", tutor.stop_all)
     keyboard.hook(on_any_key)   # not suppressed: Win and Alt must keep working normally

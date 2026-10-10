@@ -245,9 +245,7 @@ def offer_once_when_safe():
     tutor.offer(dict(safe, verified=False))
     assert not fake.state["asked"], "never offer an unverified box"
     tutor.offer(safe)
-    tutor.offer(safe)
-    offers = [c for c in fake.bridge.card.emit.call_args_list if c.args[0] == "offer"]
-    assert fake.state["offered"] and len(offers) == 1
+    assert not fake.state["asked"], "instructions only: Turo never offers to click"
 
 
 def greetings_and_noise():

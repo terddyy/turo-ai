@@ -183,16 +183,13 @@ def new_question(text, context="", mode="teach"):
     store.add_history(text, state.get("app_title", ""))
     bridge.mode.emit("reset")
     bridge.card.emit("start", text)
-    if mode == "do":
-        start_agent()
-    else:
-        start_step()
+    start_step()   # instructions only, even for "... for me"
 
 
 def offer(step):
     """Once per task, for a command (not a how-to question) or a user who is stuck, when the step is a verified,
     harmless click: ask "Want me to do it?" (card + voice). Answer: Yes button, F7, or saying "yes"."""
-    if (state.get("mode") != "offer" or state["asked"] or not step["rect"] or not step.get("verified") or step["action"] == "explain"
+    if (True or state.get("mode") != "offer" or state["asked"]   # off: Turo gives instructions only or not step["rect"] or not step.get("verified") or step["action"] == "explain"
             or any(word in step["label"].lower() for word in RISKY)):
         return
     state["asked"] = state["offered"] = True

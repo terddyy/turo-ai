@@ -60,6 +60,7 @@ class GuideCard(QWidget):
             row.addWidget(b)
             if sig is self.do_clicked:
                 self.do_button = b
+                b.hide()   # Turo teaches; it doesn't click for the user
         row.addStretch()
         lay.addLayout(row)
         self.steps = []   # (text, done)
