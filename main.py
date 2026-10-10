@@ -43,6 +43,7 @@ class Bridge(QObject):
     show = Signal(object, str)    # worker thread -> Qt thread
     mode = Signal(str)            # listening / thinking / done / reset
     copy = Signal(str)            # example prompt -> clipboard (Qt thread only)
+    card = Signal(str, str)       # task card: start / step / thinking / finish / hide / capture / restore
     clear = Signal()
 
 
@@ -51,7 +52,7 @@ app.setQuitOnLastWindowClosed(False)
 overlay = Overlay(level_fn=lambda: voice.level if voice else 0.0,
                   session_fn=lambda: bool(voice and voice.in_session()))
 bridge = Bridge()
-state = {"hwnd": None, "question": "", "history": [], "gen": 0, "stop": False,
+state = {"hwnd": None, "question": "", "context": "", "history": [], "gen": 0, "stop": False,
          "talking": False, "last": None}
 busy = threading.Lock()   # one model call at a time
 user32 = ctypes.windll.user32
@@ -80,8 +81,16 @@ def compute_step(use_cloud=False):
     Vision first: the model reads a screenshot and decides. UI Automation only sharpens the box."""
     title, items = screen.list_controls(state["hwnd"])
     skill = skills.for_app(title, screen.exe_of(state["hwnd"]))
-    image, (ml, mt, mw, mh) = screen.grab(state["hwnd"])
-    seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud, skill=skill)
+    bridge.mode.emit("capture")   # Turo's ring, label and card must not be in its own screenshot
+    bridge.card.emit("capture", "")
+    time.sleep(0.15)
+    try:
+        image, (ml, mt, mw, mh) = screen.grab(state["hwnd"])
+    finally:
+        bridge.mode.emit("thinking")
+        bridge.card.emit("restore", "")
+    seen = brain.locate(state["question"], title, image, state["history"], use_cloud=use_cloud, skill=skill,
+                        context=state["context"])
     step = {"action": seen["action"], "rect": None, "say": seen["say"], "text": seen["text"],
             "done": seen["done"], "label": seen["label"]}
     if seen["action"] == "explain":   # an answer, not a click: no box
@@ -103,16 +112,22 @@ def compute_step(use_cloud=False):
 def present(step, prefix=""):
     """Show and speak one step. For typing steps, the example goes to the clipboard."""
     say = prefix + step["say"]
+    full = say
     if step["action"] == "type" and step["text"]:
         bridge.copy.emit(step["text"])
-        say_and_show(step["rect"], f'{say}\nTry: "{step["text"]}"  (copied: press Ctrl+V)', spoken=say)
+        full = f'{say}  Try: "{step["text"]}" (copied: press Ctrl+V)'
+    if step["rect"]:   # on screen only a short label; the card holds the full instruction
+        short = "Type here, then Ctrl+V" if step["action"] == "type" else f'Click {step["label"] or "here"}'
+        say_and_show(step["rect"], short[:48], spoken=say)
     else:
-        say_and_show(step["rect"], say)
+        say_and_show(None, say)
+    bridge.card.emit("step", full)
     state["history"].append(say)
 
 
 def finish(gen):
     say_and_show(None, "All done! 🎉 Anything else?")
+    bridge.card.emit("finish", "")
     bridge.mode.emit("done")
     open_follow_up()
     time.sleep(3)
@@ -164,16 +179,17 @@ def start_step(use_cloud=False):
     if not state["question"] or not busy.acquire(blocking=False):
         return
     state["gen"] += 1   # cancels the previous click watcher
-    bridge.show.emit(None, f'"{state["question"].split(" (follow-up")[0]}"')
+    bridge.show.emit(None, "Looking…")
     bridge.mode.emit("thinking")
+    bridge.card.emit("thinking", "")
     threading.Thread(target=run_step, args=(use_cloud,), daemon=True).start()
 
 
-def new_question(text):
-    state["question"], state["history"] = text, []
-    if " (follow-up" not in text:
-        home.add_history(text, state.get("app_title", ""))
+def new_question(text, context=""):
+    state["question"], state["context"], state["history"] = text, context, []
+    home.add_history(text, state.get("app_title", ""))
     bridge.mode.emit("reset")
+    bridge.card.emit("start", text)
     start_step()
 
 
@@ -188,6 +204,8 @@ def command_of(text):
 def handle_speech(text, follow_up=False):
     cmd = command_of(text)
     print(f"[voice] heard {text!r} -> {cmd or ('follow-up' if follow_up else 'question')}")
+    if follow_up and not cmd and len(text.split()) < 3:   # stray "okay" / "yeah" picked up in a session
+        return
     if cmd == "next":
         start_step()
     elif cmd == "stop":
@@ -200,9 +218,8 @@ def handle_speech(text, follow_up=False):
         state["hwnd"] = auto.GetForegroundWindow()
         if voice and WAKE_WORD:
             voice.expect()   # a request starts (or continues) the session
-        if follow_up and state["question"]:   # keep the thread of the conversation
-            text = f"{text} (follow-up; earlier the user asked: {state['question'].split(' (follow-up')[0]})"
-        new_question(text)
+        # A follow-up keeps the earlier question as context (sent to the model, never shown or typed).
+        new_question(text, context=state["question"] if follow_up else "")
 
 
 def open_follow_up():
@@ -342,6 +359,7 @@ def run_agent():
                 if step["done"]:
                     say_and_show(None, "All done! 🎉")
                     bridge.mode.emit("done")
+                    bridge.card.emit("finish", "")
                     break
                 time.sleep(1.0)   # let the app redraw
     except Exception as err:
@@ -364,6 +382,7 @@ def stop_all():
     if voice:
         voice.expect(0)   # end the session: back to waiting for "Hey Turo"
     bridge.clear.emit()
+    bridge.card.emit("hide", "")
 
 
 # --- F6: one-time cloud ask (only after the user presses it) ------------------------
@@ -444,6 +463,28 @@ bridge.show.connect(overlay.point_at)
 bridge.mode.connect(overlay.set_mode)
 bridge.clear.connect(overlay.clear)
 bridge.copy.connect(lambda text: app.clipboard().setText(text))
+card = home.GuideCard()
+card.next_clicked.connect(lambda: start_step())
+card.do_clicked.connect(start_agent)
+card.stop_clicked.connect(stop_all)
+
+
+def on_card(op, text):
+    if op == "start":
+        card.start(text)
+    elif op == "step":
+        card.add_step(text)
+    elif op == "thinking":
+        card.thinking()
+    elif op == "finish":
+        card.finish()
+    elif op == "hide":
+        card.hide()
+    elif op in ("capture", "restore"):
+        card.setWindowOpacity(0.0 if op == "capture" else 1.0)
+
+
+bridge.card.connect(on_card)
 keyboard.add_hotkey(ASK_KEY, on_ask_key, suppress=True)
 keyboard.add_hotkey(NEXT_KEY, start_step, suppress=True)
 keyboard.add_hotkey(AGENT_KEY, start_agent, suppress=True)

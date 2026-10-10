@@ -121,7 +121,7 @@ but only pick what is actually visible in the screenshot.
 Reply with JSON only:
 {"action": "click" | "type" | "explain", "bbox_2d": [x1, y1, x2, y2], "label": string, "text": string,
  "say": string, "done": boolean}
-- action "click": bbox_2d is the box around the element to click; label is its visible text or icon name.
+- action "click": bbox_2d is the box around the element to click; label is its visible text or icon name, 1-4 words (e.g. "Freeze Panes").
 - action "type": bbox_2d is the text box to type into; text is a good, specific example the user can type
   (for prompting tasks, write a clear prompt that shows good practice).
 - action "explain": the question needs an answer, not a click (e.g. "how do I write a good prompt?");
@@ -134,11 +134,13 @@ that is open now), pick it directly. If it is hidden, pick the tab or menu that 
 Do not repeat a step listed in "Steps already shown"."""
 
 
-def locate(question, app_title, image_b64, history, use_cloud=False, skill=""):
+def locate(question, app_title, image_b64, history, use_cloud=False, skill="", context=""):
     """Main path: the vision model reads the screenshot. Returns action, box center in 0-1000 (or None),
     label, text to type, say, done."""
     shown = "\n".join(f"- {h}" for h in history) or "none"
     text = f"Task: {question}\nApp in front: {app_title}\nSteps already shown:\n{shown}"
+    if context:   # a follow-up: the user's earlier question, for context only
+        text += f"\nEarlier question in this conversation: {context}"
     content = [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
                {"type": "text", "text": text}]
     t = time.time()
