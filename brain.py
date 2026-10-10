@@ -121,7 +121,7 @@ but only pick what is actually visible in the screenshot.
 Reply with JSON only:
 {"action": "click" | "type" | "explain", "bbox_2d": [x1, y1, x2, y2], "label": string, "text": string,
  "say": string, "done": boolean}
-- action "click": bbox_2d is the box around the element to click; label is its visible text or icon name, 1-4 words (e.g. "Freeze Panes").
+- action "click": bbox_2d is the box around the element to click; label is its visible text or icon name.
 - action "type": bbox_2d is the text box to type into; text is a good, specific example the user can type
   (for prompting tasks, write a clear prompt that shows good practice).
 - action "explain": the question needs an answer, not a click (e.g. "how do I write a good prompt?");
