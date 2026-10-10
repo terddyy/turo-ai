@@ -4,9 +4,9 @@ Each file in skills/ starts with a `match:` line of comma-separated words. A ski
 appears in the window title or the program name (e.g. "excel.exe"); "=word" means the whole title equals it.
 Add an app by dropping in a new file.
 """
-from pathlib import Path
+from turo.config import ROOT
 
-SKILLS_DIR = Path(__file__).parent / "skills"
+SKILLS_DIR = ROOT / "skills"
 MAX_SKILLS = 2   # keep the prompt inside the model's 4096-token context
 
 

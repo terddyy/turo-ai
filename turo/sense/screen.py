@@ -11,7 +11,7 @@ import mss
 import uiautomation as auto
 from PIL import Image
 
-from config import MAX_ITEMS
+from turo.config import MAX_ITEMS
 
 CLICKABLE = {"ButtonControl", "SplitButtonControl", "MenuItemControl", "TabItemControl",
              "CheckBoxControl", "RadioButtonControl", "ComboBoxControl", "EditControl",

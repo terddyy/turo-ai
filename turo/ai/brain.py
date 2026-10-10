@@ -3,7 +3,7 @@ import time
 
 from openai import OpenAI
 
-from config import BASE_URL, CLOUD_API_KEY, CLOUD_BASE_URL, CLOUD_MODEL, MODEL, NO_THINK
+from turo.config import BASE_URL, CLOUD_API_KEY, CLOUD_BASE_URL, CLOUD_MODEL, MODEL, NO_THINK
 
 client = OpenAI(base_url=BASE_URL, api_key="local")
 cloud = OpenAI(base_url=CLOUD_BASE_URL, api_key=CLOUD_API_KEY) if CLOUD_API_KEY else None

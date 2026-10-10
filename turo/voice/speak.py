@@ -2,12 +2,12 @@
 import queue
 import re
 import threading
-from pathlib import Path
+from turo.config import ROOT
 
 import numpy as np
 import sounddevice as sd
 
-MODELS = Path(__file__).parent / "models"
+MODELS = ROOT / "models"
 KOKORO_MODEL = MODELS / "kokoro-v1.0.onnx"   # fp32: ~1x real time on this CPU; int8 was 8x slower
 KOKORO_VOICES = MODELS / "voices-v1.0.bin"
 TAIL_S = 0.35   # silence after each sentence

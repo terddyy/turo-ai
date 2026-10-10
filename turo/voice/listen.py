@@ -7,7 +7,7 @@ import numpy as np
 import onnx_asr
 import sounddevice as sd
 
-from config import PARAKEET_DIR
+from turo.config import PARAKEET_DIR
 
 SR = 16000
 BLOCK = 1600   # 100 ms

@@ -1,44 +1,21 @@
-"""Turo's Home window and tray icon: onboarding tour, status, ask box, app skills, history, settings."""
+"""Turo's Home window: onboarding tour, status, ask box, app skills, history, settings."""
 import json
 import os
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEasingCurve, QPointF, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame, QGraphicsOpacityEffect, QGridLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
-                               QStackedWidget, QSystemTrayIcon, QVBoxLayout, QWidget)
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout,
+                               QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton, QStackedWidget,
+                               QVBoxLayout, QWidget)
+
+from turo.config import ROOT
+from turo.ui.style import QSS, _card, _chip, _label, make_icon
 
 DATA = Path(os.environ.get("APPDATA", ".")) / "Turo"
 SETTINGS_FILE = DATA / "settings.json"
 HISTORY_FILE = DATA / "history.json"
 DEFAULTS = {"onboarded": False, "wake": True, "speak": True, "voice": "af_heart"}
-
-QSS = """
-QWidget { background: #0b1220; color: #e5e7eb; font-family: 'Segoe UI'; font-size: 13px; }
-QLabel, QCheckBox { background: transparent; }
-QLabel#title { font-size: 26px; font-weight: 700; }
-QLabel#h2 { font-size: 18px; font-weight: 700; }
-QLabel#muted, QLabel.muted { color: #94a3b8; }
-QLabel#emoji { font-size: 48px; }
-QFrame#card { background: #111a2e; border: 1px solid #1e293b; border-radius: 14px; }
-QPushButton { background: #1e293b; border: none; border-radius: 10px; padding: 9px 16px; }
-QPushButton:hover { background: #273449; }
-QPushButton#primary { background: #3b82f6; color: white; font-weight: 600; }
-QPushButton#primary:hover { background: #2563eb; }
-QPushButton#nav { background: transparent; text-align: left; padding: 10px 14px; color: #94a3b8; }
-QPushButton#nav:hover { background: #111a2e; color: #e5e7eb; }
-QPushButton#nav[active="true"] { background: #172554; color: white; font-weight: 600; }
-QLineEdit { background: #0b1220; border: 1px solid #334155; border-radius: 10px; padding: 10px 12px;
-            font-size: 14px; }
-QLineEdit:focus { border-color: #3b82f6; }
-QListWidget { background: transparent; border: none; }
-QListWidget::item { padding: 10px; border-radius: 8px; }
-QListWidget::item:hover { background: #111a2e; }
-QComboBox { background: #1e293b; border: none; border-radius: 8px; padding: 6px 10px; }
-QCheckBox { spacing: 10px; }
-"""
 
 TOUR = [
     ("👋", "Meet Turo",
@@ -89,47 +66,6 @@ def add_history(question, app):
     items.insert(0, {"q": question, "app": app, "t": time.strftime("%b %d, %I:%M %p")})
     DATA.mkdir(parents=True, exist_ok=True)
     HISTORY_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
-
-
-def make_icon(size=64):
-    """Turo's mark: the blue buddy pointer on a dark circle."""
-    pix = QPixmap(size, size)
-    pix.fill(Qt.transparent)
-    p = QPainter(pix)
-    p.setRenderHint(QPainter.Antialiasing)
-    p.setBrush(QColor("#0b1220"))
-    p.setPen(QPen(QColor("#3b82f6"), size * 0.06))
-    p.drawEllipse(QPointF(size / 2, size / 2), size * 0.45, size * 0.45)
-    s, ox, oy = size / 64, size * 0.30, size * 0.24
-    path = QPainterPath(QPointF(ox, oy))
-    for x, y in ((14, 40), (22, 26), (36, 20)):
-        path.lineTo(ox + x * s, oy + y * s * 0.9)
-    path.closeSubpath()
-    p.setPen(QPen(QColor("white"), size * 0.04))
-    p.setBrush(QColor("#3b82f6"))
-    p.drawPath(path)
-    p.end()
-    return QIcon(pix)
-
-
-def _card():
-    f = QFrame()
-    f.setObjectName("card")
-    return f
-
-
-def _label(text, name=None, wrap=True):
-    lab = QLabel(text)
-    if name:
-        lab.setObjectName(name)
-    lab.setWordWrap(wrap)
-    return lab
-
-
-def _chip(text):
-    lab = QLabel(text)
-    lab.setStyleSheet("background:#172554; color:#bfdbfe; border-radius:10px; padding:4px 10px; font-weight:600;")
-    return lab
 
 
 class Home(QWidget):
@@ -356,7 +292,7 @@ class Home(QWidget):
             grid.addWidget(card, n // 2, n % 2)
         lay.addLayout(grid)
         more = QPushButton("Add or edit skills…")
-        more.clicked.connect(lambda: os.startfile(Path(__file__).parent / "skills"))
+        more.clicked.connect(lambda: os.startfile(ROOT / "skills"))
         lay.addWidget(more, 0, Qt.AlignLeft)
         lay.addStretch()
         return w
@@ -433,118 +369,6 @@ class Home(QWidget):
                 dot, lab = self.status_rows[key]
                 dot.setStyleSheet(f"color: {'#22c55e' if ok else '#f59e0b'}; font-size: 16px;")
                 lab.setText(detail)
-
-
-class GuideCard(QWidget):
-    """Small always-on-top card in the corner: the task, a checklist of steps, and Next / Do it / Stop.
-    The screen itself only gets a thin ring and a short label; the full instruction lives here."""
-    next_clicked = Signal()
-    do_clicked = Signal()
-    stop_clicked = Signal()
-
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setStyleSheet(QSS + "QWidget#guide { background:#0b1220; border:1px solid #1e293b; border-radius:14px; }"
-                           "QPushButton { padding:6px 12px; }")
-        self.setFixedWidth(340)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        frame = QFrame()
-        frame.setObjectName("guide")
-        outer.addWidget(frame)
-        lay = QVBoxLayout(frame)
-        lay.setContentsMargins(16, 12, 16, 14)
-        lay.setSpacing(8)
-        head = QHBoxLayout()
-        logo = QLabel()
-        logo.setPixmap(make_icon(20).pixmap(20, 20))
-        head.addWidget(logo)
-        self.status = _label("Turo", wrap=False)
-        self.status.setStyleSheet("color:#93c5fd; font-weight:600;")
-        head.addWidget(self.status, 1)
-        close = QPushButton("×")
-        close.setFixedWidth(30)
-        close.clicked.connect(self.hide)
-        head.addWidget(close)
-        lay.addLayout(head)
-        self.title = _label("")
-        self.title.setStyleSheet("font-size:15px; font-weight:700;")
-        lay.addWidget(self.title)
-        self.steps_box = QVBoxLayout()
-        self.steps_box.setSpacing(6)
-        lay.addLayout(self.steps_box)
-        row = QHBoxLayout()
-        for text, sig, primary in [("Next", self.next_clicked, True), ("Do it", self.do_clicked, False),
-                                   ("Stop", self.stop_clicked, False)]:
-            b = QPushButton(text)
-            if primary:
-                b.setObjectName("primary")
-            b.clicked.connect(sig.emit)
-            row.addWidget(b)
-        row.addStretch()
-        lay.addLayout(row)
-        self.steps = []   # (text, done)
-
-    def start(self, question):
-        self.title.setText(question)
-        self.steps = []
-        self._render("Looking at your screen…")
-        self._place()
-        self.show()
-
-    def thinking(self):
-        self._render("Looking at your screen…")
-
-    def add_step(self, text):
-        self.steps = [(t, True) for t, _ in self.steps] + [(text, False)]
-        self._render(f"Step {len(self.steps)}")
-        self.show()
-
-    def finish(self):
-        self.steps = [(t, True) for t, _ in self.steps]
-        self._render("All done 🎉")
-
-    def _render(self, status):
-        self.status.setText(f"Turo · {status}")
-        while self.steps_box.count():
-            item = self.steps_box.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        for i, (text, done) in enumerate(self.steps[-5:], start=max(1, len(self.steps) - 4)):
-            lab = _label(f"{'✓' if done else '●'}  {i}. {text}")
-            lab.setStyleSheet("color:#64748b;" if done else "color:#e5e7eb; font-size:14px;")
-            self.steps_box.addWidget(lab)
-        self._place()
-
-    def _place(self):
-        # Size from the wrapped text's real height (adjustSize() guessed too small and Qt logged a warning
-        # on every step), then sit in the bottom-right corner above the taskbar.
-        h = self.layout().totalHeightForWidth(self.width())
-        g = QApplication.primaryScreen().availableGeometry()
-        self.setGeometry(g.right() - self.width() - 16, g.bottom() - h - 16, self.width(), h)
-
-
-class Tray(QSystemTrayIcon):
-    def __init__(self, home, on_ask, on_toggle_listen, on_quit):
-        super().__init__(make_icon(), home)
-        self.setToolTip("Turo: say “Hey Turo”")
-        menu = QMenu()
-        for text, fn in [("Open Turo", home.show_front), ("Ask (type)…", on_ask),
-                         ("Pause / resume listening", on_toggle_listen), ("Tour", home.show_tour)]:
-            act = QAction(text, menu)
-            act.triggered.connect(fn)
-            menu.addAction(act)
-        menu.addSeparator()
-        quit_act = QAction("Quit Turo", menu)
-        quit_act.triggered.connect(on_quit)
-        menu.addAction(quit_act)
-        self._menu = menu
-        self.setContextMenu(menu)
-        self.activated.connect(lambda reason: home.show_front()
-                               if reason == QSystemTrayIcon.Trigger else None)
-        self.show()
 
 
 if __name__ == "__main__":

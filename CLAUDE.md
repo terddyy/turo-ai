@@ -12,7 +12,7 @@ That guide is the source of truth for scope and order; this file adds verified A
 
 - **Speed over polish.** Working demo > clean architecture. No new abstractions, no test framework,
   no type-hint campaigns. Each module gets a `if __name__ == "__main__":` smoke test (as in the guide).
-- **Build order is fixed** (features 1→8, files config → screen → brain → overlay → main → voice → speak).
+- **Build order is fixed** (features 1→8, see Layout below).
   Each step must leave a runnable product. Skip a feature that overruns its slot; never break an earlier one.
 - **Feature freeze at 8:45** (moved from 8:20 by the user; do not push it later). After that: only the
   worst-bug fix, README, video. 8:45 rehearse (Wi-Fi off) → 9:00 video + README + key check + repo public
@@ -62,13 +62,23 @@ That guide is the source of truth for scope and order; this file adds verified A
 - ~4 GB free RAM with Chrome open → close Chrome/heavy apps before testing.
 - Display 2560×1600 with Windows scaling on (fractional DPR expected, e.g. 1.5).
 
-## Run
+## Layout and run
+
+```
+main.py               launcher (desktop shortcut runs `pythonw main.py`; same as `python -m turo`)
+turo/app.py           wiring: tutor loop (steps, auto-advance, agent), voice/hotkeys, Home, tray, task card
+turo/config.py        model, hotkeys, paths (ROOT = repo root)
+turo/ai/              brain.py (vision + text prompts), skills.py (loads skills/*.md)
+turo/sense/screen.py  UI Automation controls, screenshot, snap point -> exact control
+turo/voice/           listen.py (Parakeet STT, "Hey Turo", sessions), speak.py (Kokoro TTS)
+turo/ui/              overlay.py (buddy cursor), home.py, card.py (task card), tray.py, style.py
+skills/  models/      per-app know-how; Kokoro model files (git-ignored)
+```
 
 ```powershell
-cd $HOME\Desktop\turo
-.venv\Scripts\activate
-python screen.py   # each module has a smoke test; switch to Excel within 3 s
-python main.py     # full app
+cd $HOME\Desktop	uro
+.venv\Scripts\python main.py              # full app (or double-click the Turo desktop shortcut)
+.venv\Scripts\python -m turo.ui.overlay   # smoke tests: each module has a __main__ block
 ```
 
 ## Verified API notes (Context7, Oct 10 2026)

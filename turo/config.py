@@ -1,4 +1,7 @@
 import os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent   # repo root: main.py, skills/, models/
 
 BASE_URL = "http://localhost:11434/v1"   # Ollama's OpenAI-compatible endpoint
 MODEL = "qwen3-vl:4b-instruct"   # the default 4b tag always thinks: 26 s+ per step, sometimes minutes
