@@ -6,14 +6,15 @@ import threading
 import time
 import urllib.request
 
-from turo.ui import home
+from turo.config import DATA
+from turo.ui import home, store
 from turo.ui.card import GuideCard
 from turo.ui.style import make_icon
 from turo.ui.tray import Tray
 
 if sys.stdout is None:   # started without a console (pythonw / desktop shortcut): log to a file
-    home.DATA.mkdir(parents=True, exist_ok=True)
-    sys.stdout = sys.stderr = open(home.DATA / "turo.log", "a", encoding="utf-8", buffering=1)
+    DATA.mkdir(parents=True, exist_ok=True)
+    sys.stdout = sys.stderr = open(DATA / "turo.log", "a", encoding="utf-8", buffering=1)
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
@@ -30,7 +31,7 @@ overlay = Overlay(level_fn=lambda: voice.level if voice else 0.0,
                   session_fn=lambda: bool(voice and voice.in_session()))
 
 # --- settings and the ready check ----------------------------------------------------
-settings = home.load_settings()
+settings = store.load_settings()
 status = {"Local AI": (False, "checking…")}
 
 
@@ -59,7 +60,7 @@ def get_status():
 
 def apply_setting(key, value):
     settings[key] = value
-    home.save_settings(settings)
+    store.save_settings(settings)
     if key == "speak" and speak:
         speak.enabled = value
         if not value:

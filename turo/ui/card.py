@@ -3,7 +3,7 @@ Next / Do it / Stop. The screen itself only gets the buddy cursor and a short la
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from turo.ui.style import QSS, _label, make_icon
+from turo.ui.style import QSS, make_icon, make_label
 
 
 class GuideCard(QWidget):
@@ -17,7 +17,7 @@ class GuideCard(QWidget):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setStyleSheet(QSS + "QWidget#guide { background:#0b1220; border:1px solid #1e293b; border-radius:14px; }"
+        self.setStyleSheet(QSS + "QWidget#guide { background:#0d1526; border:1px solid #2a3c60; border-top:2px solid #4f8ff8; border-radius:14px; }"
                            "QPushButton { padding:6px 12px; }")
         self.setFixedWidth(340)
         outer = QVBoxLayout(self)
@@ -32,7 +32,7 @@ class GuideCard(QWidget):
         logo = QLabel()
         logo.setPixmap(make_icon(20).pixmap(20, 20))
         head.addWidget(logo)
-        self.status = _label("Turo", wrap=False)
+        self.status = make_label("Turo", wrap=False)
         self.status.setStyleSheet("color:#93c5fd; font-weight:600;")
         head.addWidget(self.status, 1)
         close = QPushButton("×")
@@ -40,7 +40,7 @@ class GuideCard(QWidget):
         close.clicked.connect(self.hide)
         head.addWidget(close)
         lay.addLayout(head)
-        self.title = _label("")
+        self.title = make_label("")
         self.title.setStyleSheet("font-size:15px; font-weight:700;")
         lay.addWidget(self.title)
         self.steps_box = QVBoxLayout()
@@ -84,7 +84,7 @@ class GuideCard(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         for i, (text, done) in enumerate(self.steps[-5:], start=max(1, len(self.steps) - 4)):
-            lab = _label(f"{'✓' if done else '●'}  {i}. {text}")
+            lab = make_label(f"{'✓' if done else '●'}  {i}. {text}")
             lab.setStyleSheet("color:#64748b;" if done else "color:#e5e7eb; font-size:14px;")
             self.steps_box.addWidget(lab)
         self._place()

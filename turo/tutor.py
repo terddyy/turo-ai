@@ -13,7 +13,7 @@ from turo.ai import brain, memory, skills
 from turo.config import MAX_AGENT_STEPS
 from turo.sense import screen
 from turo.session import bridge, busy, open_follow_up, say_and_show, speak, state, user32, voice
-from turo.ui import home
+from turo.ui import store
 
 RISKY = ("delete", "remove", "send", "pay", "buy", "format", "sign out", "shut down", "uninstall")
 
@@ -154,7 +154,7 @@ def new_question(text, context=""):
         speak.stop()   # a new question replaces whatever Turo was saying
     state["question"], state["context"], state["history"] = text, context, []
     state["path"], state["recalled"] = [], "unset"
-    home.add_history(text, state.get("app_title", ""))
+    store.add_history(text, state.get("app_title", ""))
     bridge.mode.emit("reset")
     bridge.card.emit("start", text)
     start_step()
